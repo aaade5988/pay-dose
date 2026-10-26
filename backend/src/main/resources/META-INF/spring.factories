@@ -1,0 +1,3 @@
+# 在 Spring 环境准备阶段创建 SQLite 目录（此时组件扫描尚未发生，故用 spring.factories 注册）
+org.springframework.context.ApplicationListener=\
+com.dose.pay.config.SqliteDirectoryInitializer

@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# pay-dose · 信用卡支付资金规划器
+# 单用户单机应用，数据存 SQLite 文件
+# ─────────────────────────────────────────────────────────────
+server:
+  port: ${SERVER_PORT:8000}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: pay-dose
+
+  datasource:
+    # SQLite 文件位置：默认 ./data/pay-dose.db（相对启动目录）
+    url: jdbc:sqlite:${PAY_DOSE_DB:./data/pay-dose.db}?foreign_keys=on
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite 是单写者模型：连接池给 1 个写连接可避免 SQLITE_BUSY
+      maximum-pool-size: 1
+      minimum-idle: 1
+      connection-timeout: 5000
+      pool-name: pay-dose-sqlite
+
+  jpa:
+    # SQLite 无完整 DDL 支持，表结构由 Hibernate 生成（单机应用，无历史迁移包袱）
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+        format_sql: false
+        jdbc:
+          time_zone: Asia/Shanghai
+    show-sql: ${JPA_SHOW_SQL:false}
+
+  jackson:
+    default-property-inclusion: always
+
+logging:
+  level:
+    root: INFO
+    com.dose.pay: ${LOG_LEVEL:INFO}
+    org.hibernate.SQL: ${LOG_SQL:WARN}

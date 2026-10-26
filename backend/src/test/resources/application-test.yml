@@ -1,0 +1,20 @@
+# 测试配置：SQLite 临时文件库（每个测试类独立，互不污染）
+spring:
+  datasource:
+    url: jdbc:sqlite:${java.io.tmpdir}/pay-dose-test-${random.uuid}.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+  jackson:
+    default-property-inclusion: always
+
+logging:
+  level:
+    root: WARN
+    com.dose.pay: INFO
