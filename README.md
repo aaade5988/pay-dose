@@ -21,14 +21,37 @@
 pay-dose/
 ├── backend/                  # Kotlin + Spring Boot 后端
 │   ├── pom.xml
+│   ├── scripts/e2e_smoke.py  # 端到端冒烟（42 断言）
 │   ├── src/main/kotlin/com/dose/pay/
 │   │   ├── domain/           # 算法核心 + 实体 + 仓储
 │   │   ├── api/              # DTO + 业务服务
 │   │   ├── web/              # REST 路由 + 全局异常映射
-│   │   └── config/           # Jackson 严格反序列化 + SQLite 目录初始化
-│   └── src/test/             # 算法单测 + 接口集成测试
-└── android-app/              # Android Compose 客户端
+│   │   ├── config/           # Jackson 严格反序列化 + SQLite 目录初始化
+│   │   └── tools/            # 数据迁移工具（Migrator + CLI）
+│   └── src/test/             # 算法 19 + 接口 39 + 迁移 5 + 兼容 1
+├── android-app/              # Android Compose 客户端（37 文件 5578 行）
+│   └── app/src/main/java/com/dose/pay/android/
+│       ├── core/             # 金额「分」运算 + 环形算法 + 日期工具
+│       ├── data/             # DTO + Retrofit + Repository
+│       └── ui/               # calc / cards / cardedit / dashboard / flow / profile
+├── docs/
+│   ├── android-spec.md       # Android 实现规格书
+│   ├── migration.md          # 数据迁移指南
+│   └── progress.md           # 开发进度与踩坑记录
+└── scripts/run.py            # 一键启动后端
 ```
+
+## 验收状态
+
+| 层级 | 数量 | 结果 |
+|---|---|---|
+| 算法单测 | 19 | ✅ |
+| 接口集成（SQLite） | 39 | ✅ |
+| 迁移工具 | 5 | ✅ |
+| 迁移后兼容 | 1 | ✅ |
+| **JUnit 合计** | **64** | ✅ |
+| 端到端冒烟 | 42 断言 | ✅ |
+| Android 构建 | assembleDebug | ✅ 17MB APK |
 
 ## 快速开始
 
@@ -66,16 +89,58 @@ mvn -B test -Dtest=PlannerApiTest              # 仅接口（SQLite 临时库）
 
 ### Android
 
-前置：Android SDK、JDK 17
+前置：Android SDK（platform 36 + build-tools）、JDK 17
 
 ```powershell
 cd android-app
+
 $env:JAVA_HOME = "D:\Program Files\Java\jdk-17"
+$env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
+
 .\gradlew.bat assembleDebug
 ```
 
-APK 产出在 `app/build/outputs/apk/debug/app-debug.apk`。
-模拟器通过 `http://10.0.2.2:8000` 访问宿主机后端。
+APK 产出在 `app/build/outputs/apk/debug/app-debug.apk`（约 17 MB）。
+
+安装到模拟器或真机：
+
+```powershell
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb shell am start -n com.dose.pay.android/.MainActivity
+```
+
+> `local.properties` 需写 `sdk.dir=E\:\\Android\\Sdk`（指向你自己的 SDK 路径）。
+> 该文件已被 `.gitignore` 忽略，换机器需重新配置。
+
+**模拟器访问宿主机后端**：App 里默认 Base URL 是 `http://10.0.2.2:8000`（`10.0.2.2` 是 Android 模拟器映射宿主机的地址）。如果后端跑在别的端口或用真机调试，在「我的」页里改 Base URL 即可。
+
+### 跑测试
+
+```powershell
+cd backend
+mvn -B test                                    # 全部（64 个用例）
+mvn -B test -Dtest=CalculatorTest              # 仅算法（无需数据库）
+mvn -B test -Dtest=PlannerApiTest              # 仅接口（SQLite 临时库）
+```
+
+### 端到端冒烟（需后端已启动）
+
+```powershell
+cd backend
+python scripts/e2e_smoke.py
+```
+
+### 从原项目迁移数据
+
+如果你有原 `credit-payment-planner` 的数据，见 [docs/migration.md](docs/migration.md)。
+
+```powershell
+cd backend
+# 先预演，不写目标库
+java -cp target/pay-dose.jar com.dose.pay.tools.MainKt --source sqlite --source-file "<旧库路径>" --dry-run
+# 确认后正式迁移
+java -cp target/pay-dose.jar com.dose.pay.tools.MainKt --source sqlite --source-file "<旧库路径>" --truncate
+```
 
 ## 核心算法
 
