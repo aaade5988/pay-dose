@@ -1,0 +1,5 @@
+# 本目录内的 Gradle 本地缓存与构建产物（不提交）
+.gradle-home/
+.gradle/
+build/
+local.properties
