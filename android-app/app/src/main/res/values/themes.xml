@@ -1,0 +1,9 @@
+<resources>
+    <!-- Compose 应用只保留一个无标题栏主题，具体配色由 Compose 侧接管 -->
+    <style name="Theme.PayDose" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
