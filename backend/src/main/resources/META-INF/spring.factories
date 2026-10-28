@@ -1,4 +1,0 @@
-# SQLite 路径裁定：在数据源建立前把数据库固定到项目根 data/pay-dose.db，
-# 避免相对路径随启动目录漂移（曾出现 backend/data 与根 data 各一份的问题）
-org.springframework.boot.env.EnvironmentPostProcessor=\
-com.dose.pay.config.SqlitePathEnvironmentPostProcessor
