@@ -1,6 +1,7 @@
 # ── 构建产物 ──
 target/
 build/
+.kotlin/
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
 
@@ -34,9 +35,25 @@ data/
 Thumbs.db
 desktop.ini
 
+# ── 签名密钥（绝对不能进库）──
+# keystore 泄露 = 任何人都能签一个可覆盖安装你 App 的包。
+# 请自行多处备份：U 盘 / 云盘 / 密码管理器。
+android-app/keystore/
+*.jks
+*.keystore
+keystore.properties
+
+# ── 数据备份 ──
+*.db.backup*
+*.db.bak
+data/backup/
+
 # ── 日志与临时 ──
 *.log
 logs/
 tmp/
 temp/
 *.tmp
+
+# ── 后端（仅本地学习用，不入库）──
+backend/

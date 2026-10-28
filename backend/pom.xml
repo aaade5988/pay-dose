@@ -166,6 +166,38 @@
                     <trimStackTrace>false</trimStackTrace>
                 </configuration>
             </plugin>
+
+            <!-- 迁移工具运行器：mvn exec:java 传入工具参数（见 docs/migration.md） -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.1</version>
+                <configuration>
+                    <mainClass>com.dose.pay.tools.MainKt</mainClass>
+                    <classpathScope>runtime</classpathScope>
+                </configuration>
+            </plugin>
+
+            <!-- 依赖复制到 target/lib，便于用 java -cp "target/classes;target/lib/*" 直接运行工具 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                            <overWriteReleases>false</overWriteReleases>
+                            <overWriteSnapshots>false</overWriteSnapshots>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

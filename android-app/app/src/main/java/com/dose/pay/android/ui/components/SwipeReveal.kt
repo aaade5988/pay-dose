@@ -8,8 +8,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -32,9 +34,12 @@ import androidx.compose.ui.unit.sp
 import com.dose.pay.android.ui.theme.PayColors
 
 /**
- * 左滑露出删除按钮的列表行（对齐原小程序的 swipe-item）。
+ * 左滑露出操作按钮的列表行（对齐原小程序的 swipe-item）。
  *
- * @param onDelete 点击露出后的「删除」按钮
+ * 账单页用 [actionLabel] =「删除」，看板周期卡用「已还清」，
+ * 颜色走 [actionColor]，所以这里不写死「删除」语义。
+ *
+ * @param onAction 点击露出后的操作按钮
  * @param onContentClick 点击内容区（已展开时先收起）
  * @param content 行内容
  */
@@ -42,8 +47,9 @@ import com.dose.pay.android.ui.theme.PayColors
 fun SwipeRevealRow(
     modifier: Modifier = Modifier,
     actionWidthDp: Int = 75,
-    deleteLabel: String = "删除",
-    onDelete: () -> Unit,
+    actionLabel: String = "删除",
+    actionColor: Color = PayColors.Accent,
+    onAction: () -> Unit,
     onContentClick: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
@@ -57,30 +63,36 @@ fun SwipeRevealRow(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            // IntrinsicSize.Min：把行高变成「有界」约束。
+            // 列表在 verticalScroll 里高度约束是无穷的，直接 fillMaxHeight 会退化成 0 高度，
+            // 删除按钮就成了「有宽度没高度」——左滑时右侧永远是一片空白。
+            .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(13.dp))
     ) {
-        // 底层：删除按钮
+        // 底层：操作按钮
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .width(actionWidthDp.dp)
                 .fillMaxHeight()
-                .background(PayColors.Accent)
+                .background(actionColor)
                 .clickable {
                     offsetX = 0f
-                    onDelete()
+                    onAction()
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Text(deleteLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(actionLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
 
         // 上层：内容（可左滑）
+        // 顺序要紧：graphicsLayer 必须在 background 之前。
+        // 反过来的话白色底留在原位不动（只有文字被平移），会把底下的删除按钮整块盖住。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(PayColors.Surface)
                 .graphicsLayer { translationX = animatedOffset }
+                .background(PayColors.Surface)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { dragging = true },

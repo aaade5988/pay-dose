@@ -18,6 +18,9 @@ import java.math.RoundingMode
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** 迁移源类型 */
 enum class SourceKind { SQLITE, MYSQL }
@@ -103,6 +106,9 @@ class Migrator(
     private val dryRun: Boolean,
     private val truncate: Boolean,
 ) {
+
+    /** 与后端 hibernate.jdbc.time_zone 保持一致，否则日期会差 8 小时 */
+    private val budgetZone: ZoneId = ZoneId.of("Asia/Shanghai")
 
     fun run(): MigrationReport {
         val srcMethods = readSourceMethods()
@@ -212,7 +218,7 @@ class Migrator(
                             paymentMethodId = rs.getLong("payment_method_id"),
                             type = rs.getString("type") ?: "",
                             amount = toDecimal(rs.getString("amount")) ?: BigDecimal.ZERO,
-                            txnDate = normalizeDate(rs.getString("txn_date")),
+                            txnDate = normalizeDate(rs.getObject("txn_date")),
                             note = rs.getString("note") ?: "",
                         )
                     )
@@ -239,7 +245,7 @@ class Migrator(
                     due_days_after_statement INTEGER,
                     statement_day_inclusive INTEGER NOT NULL DEFAULT 0,
                     active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
+                    created_at timestamp NOT NULL
                 )
                 """.trimIndent()
             )
@@ -250,9 +256,9 @@ class Migrator(
                     payment_method_id INTEGER NOT NULL,
                     type TEXT NOT NULL,
                     amount TEXT NOT NULL,
-                    txn_date TEXT NOT NULL,
+                    txn_date timestamp NOT NULL,
                     note TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL
+                    created_at timestamp NOT NULL
                 )
                 """.trimIndent()
             )
@@ -268,8 +274,7 @@ class Migrator(
         """.trimIndent()
         var count = 0
         targetConn.prepareStatement(sql).use { ps ->
-            val now = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            val nowMillis = System.currentTimeMillis()
             rows.forEach { r ->
                 ps.setLong(1, r.id)
                 ps.setString(2, r.name)
@@ -285,7 +290,9 @@ class Migrator(
                 else ps.setInt(8, r.dueDaysAfterStatement)
                 ps.setInt(9, if (r.statementDayInclusive) 1 else 0)
                 ps.setInt(10, if (r.active) 1 else 0)
-                ps.setString(11, now)
+                // created_at 以 epoch 毫秒写入，与 Hibernate（sqlite-jdbc）口径一致；
+                // 写成 'yyyy-MM-dd HH:mm:ss' 文本会让 Hibernate 回读时 ParseException。
+                ps.setLong(11, nowMillis)
                 ps.addBatch()
                 count++
             }
@@ -302,17 +309,17 @@ class Migrator(
         """.trimIndent()
         var count = 0
         targetConn.prepareStatement(sql).use { ps ->
-            val now = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            val nowMillis = System.currentTimeMillis()
             rows.forEach { r ->
                 ps.setLong(1, r.id)
                 ps.setLong(2, r.paymentMethodId)
                 ps.setString(3, r.type)
                 // 同 payment_methods：金额坚持文本存储，避免 SQLite NUMERIC 亲和性丢小数位
                 ps.setString(4, r.amount.setScale(2, RoundingMode.HALF_EVEN).toPlainString())
-                ps.setString(5, r.txnDate)
+                // txn_date / created_at 写 epoch 毫秒，避免 Hibernate 回读时 ParseException
+                ps.setLong(5, dateToEpochMillis(r.txnDate))
                 ps.setString(6, r.note)
-                ps.setString(7, now)
+                ps.setLong(7, nowMillis)
                 ps.addBatch()
                 count++
             }
@@ -357,7 +364,7 @@ class Migrator(
                             paymentMethodId = rs.getLong("payment_method_id"),
                             type = rs.getString("type") ?: "",
                             amount = toDecimal(rs.getString("amount")) ?: BigDecimal.ZERO,
-                            txnDate = normalizeDate(rs.getString("txn_date")),
+                            txnDate = normalizeDate(rs.getObject("txn_date")),
                             note = rs.getString("note") ?: "",
                         )
                     )
@@ -461,11 +468,36 @@ class Migrator(
         }
     }
 
-    /** 日期归一为 YYYY-MM-DD（源库可能带时间部分） */
-    private fun normalizeDate(text: String?): String {
-        if (text.isNullOrBlank()) return ""
-        val trimmed = text.trim()
+    /**
+     * 日期归一为 YYYY-MM-DD。
+     *
+     * 同一个 date/timestamp 列在不同写入路径下物理表示不同：
+     * - Hibernate / 本工具新格式 → epoch 毫秒整数；
+     * - 早期迁移产物 → 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:mm:ss' 文本。
+     * 两种都要能读回同一个日期字符串，否则对账会自己报差异。
+     */
+    private fun normalizeDate(value: Any?): String {
+        if (value == null) return ""
+        if (value is Number) {
+            return Instant.ofEpochMilli(value.toLong()).atZone(budgetZone).toLocalDate().toString()
+        }
+        val trimmed = value.toString().trim()
+        if (trimmed.isEmpty()) return ""
+        // 以文本形态存的毫秒数（列有 TEXT affinity 时会被转成字符串）
+        trimmed.toLongOrNull()?.let {
+            return Instant.ofEpochMilli(it).atZone(budgetZone).toLocalDate().toString()
+        }
         return if (trimmed.length >= 10) trimmed.substring(0, 10) else trimmed
+    }
+
+    /** "YYYY-MM-DD"（或带时间）→ 当日 00:00 的 epoch 毫秒，与 Hibernate 写入口径一致 */
+    private fun dateToEpochMillis(date: String): Long {
+        val normalized = normalizeDate(date)
+        return try {
+            LocalDate.parse(normalized).atStartOfDay(budgetZone).toInstant().toEpochMilli()
+        } catch (e: Exception) {
+            System.currentTimeMillis()
+        }
     }
 
     private fun amountEquals(a: BigDecimal?, b: BigDecimal?): Boolean {

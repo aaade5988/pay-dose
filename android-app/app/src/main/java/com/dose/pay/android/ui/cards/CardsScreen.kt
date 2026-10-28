@@ -133,7 +133,8 @@ fun CardsScreen(
                 state.rows.forEach { row ->
                     SwipeRevealRow(
                         modifier = Modifier.fillMaxWidth(),
-                        onDelete = { pendingDelete = row },
+                        actionLabel = "删除",
+                        onAction = { pendingDelete = row },
                         onContentClick = { onOpenEditor(row.id) },
                     ) {
                         Row(

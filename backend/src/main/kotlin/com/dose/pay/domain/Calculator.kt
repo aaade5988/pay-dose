@@ -28,6 +28,8 @@ data class PaymentMethod(
     /** 账单日当天是否计入本期（false 时当天消费算下一期，资金占用更久） */
     val statementDayInclusive: Boolean,
     val active: Boolean = true,
+    /** 「已还清」标记有效期（= 标记时所在周期的还款日）；null = 未标记 */
+    val settledUntil: LocalDate? = null,
 )
 
 /**
@@ -197,6 +199,56 @@ object Calculator {
 
         return results.sortedByDescending { it.occupiedDays }.take(topN)
     }
+
+    // -------------------- 账单周期 --------------------
+
+    /**
+     * 某笔消费归属的账单周期终点（就是它的还款日）。
+     *
+     * 这是「上一还款日 → 这一还款日」口径的唯一判定依据：
+     * 一笔消费属于哪一期，取决于它什么时候要还，而不是它发生在自然月哪一天。
+     *
+     * 非信用卡、或信用卡缺还款规则时返回 null（无法归期）。
+     */
+    fun cycleEndFor(txnDate: LocalDate, method: PaymentMethod): LocalDate? = try {
+        calculateDueDate(txnDate, method)
+    } catch (e: IllegalArgumentException) {
+        null
+    }
+
+    /**
+     * 当前账单周期窗口 (上一还款日, 本还款日]。
+     *
+     * - 本还款日 cycleEnd = 今天这笔消费会落到的那一期还款日；
+     * - 上一还款日 = 还款日序列里排在 cycleEnd 前一个的那个。
+     *
+     * 注意不能「逐日往前找还款日不变的日期」——还款日序列不是逐日连续的同值区间：
+     * 例如账单日 1 日、还款日 21 日时，11-20 刷的归 12-21，而 10-30 刷的归 11-21，
+     * 中间 11-01 账单日一刀切开。所以改为按月回退试探。
+     *
+     * 非信用卡返回 null（即时扣款，没有账单周期）。
+     */
+    fun cycleWindow(today: LocalDate, method: PaymentMethod): Pair<LocalDate, LocalDate>? {
+        // 非信用卡的「还款日」= 刷卡当天（即时扣款），没有账单周期可言
+        if (method.methodType != CREDIT_CARD) return null
+        val cycleEnd = cycleEndFor(today, method) ?: return null
+
+        var probe = cycleEnd.minusMonths(1)
+        var previous = cycleEnd
+        var guard = 0
+        while (guard++ < MAX_CYCLE_PROBE_MONTHS) {
+            val candidate = cycleEndFor(probe, method) ?: break
+            if (candidate.isBefore(cycleEnd)) {
+                previous = candidate
+                break
+            }
+            probe = probe.minusMonths(1)
+        }
+        return Pair(previous, cycleEnd)
+    }
+
+    /** 回退试探上限（防御性，正常 2 次内命中） */
+    private const val MAX_CYCLE_PROBE_MONTHS = 6
 
     // -------------------- 金额工具 --------------------
 

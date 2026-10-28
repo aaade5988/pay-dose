@@ -1,3 +1,4 @@
-# 在 Spring 环境准备阶段创建 SQLite 目录（此时组件扫描尚未发生，故用 spring.factories 注册）
-org.springframework.context.ApplicationListener=\
-com.dose.pay.config.SqliteDirectoryInitializer
+# SQLite 路径裁定：在数据源建立前把数据库固定到项目根 data/pay-dose.db，
+# 避免相对路径随启动目录漂移（曾出现 backend/data 与根 data 各一份的问题）
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.dose.pay.config.SqlitePathEnvironmentPostProcessor

@@ -48,10 +48,6 @@ data class RecView(
     val afterUsedText: String,
     val limitShow: String,
     val remainingAfterText: String,
-    val ringNone: Boolean,
-    val ringP: Float,
-    val ringColor: Color,
-    val ringPctText: String,
     val reason: String,
 )
 
@@ -255,8 +251,6 @@ class CalcViewModel(
         val views = items.mapIndexed { index, item ->
             val card = methodMap[item.paymentMethodId.toString()]
             val hasLimit = !item.creditLimit.isNullOrBlank()
-            val afterPct = if (hasLimit) Money.percentOf(item.afterUsed, item.creditLimit) else null
-            val ringStatus = Methods.usageStatus(afterPct)
 
             val remainingAfter = when {
                 card != null && !card.availableLimit.isNullOrBlank() ->
@@ -279,10 +273,6 @@ class CalcViewModel(
                 afterUsedText = Money.money(item.afterUsed),
                 limitShow = if (hasLimit) Money.money(item.creditLimit) else "不限额",
                 remainingAfterText = remainingAfter,
-                ringNone = afterPct == null,
-                ringP = Methods.ringArc(afterPct),
-                ringColor = ringStatus.color,
-                ringPctText = if (afterPct == null) "—" else Math.round(afterPct).toInt().toString() + "%",
                 reason = item.reason,
             )
         }

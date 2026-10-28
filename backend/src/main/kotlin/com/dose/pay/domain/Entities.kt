@@ -53,6 +53,19 @@ class PaymentMethodEntity(
     @Column(name = "active", nullable = false)
     var active: Boolean = true,
 
+    /**
+     * 「已还清」标记的有效期（= 标记时所在账单周期的还款日）。
+     *
+     * 这是**人工标记**，不是流水：标记后该卡本期消费在看板里显示为「已还清」，
+     * 不再计入额度占用（仪表盘里那一段换成另一种颜色冻结）。
+     *
+     * 写成日期而不是布尔值，是为了让标记**随周期自动失效**：
+     * 过了本期还款日进入下一期，标记自动过期，卡片恢复正常占用，无需人工清理。
+     * 取消标记 = 置 NULL。
+     */
+    @Column(name = "settled_until", nullable = true)
+    var settledUntil: LocalDate? = null,
+
     @Column(name = "created_at", nullable = false)
     var createdAt: LocalDateTime = LocalDateTime.now(),
 ) {
@@ -68,6 +81,7 @@ class PaymentMethodEntity(
         dueDaysAfterStatement = dueDaysAfterStatement,
         statementDayInclusive = statementDayInclusive,
         active = active,
+        settledUntil = settledUntil,
     )
 }
 

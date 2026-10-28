@@ -61,6 +61,14 @@ data class MethodDTO(
     @JsonProperty("statement_day_inclusive")
     val statementDayInclusive: Boolean,
     val active: Boolean,
+    /** 「已还清」人工标记是否生效中（标记在本期还款日后自动失效） */
+    val settled: Boolean,
+)
+
+/** 「标记已还清」请求体 */
+data class SettleRequest(
+    /** true = 标记本期已还清；false = 取消标记 */
+    val settled: Boolean = true,
 )
 
 data class MethodsResponse(val methods: List<MethodDTO>)
@@ -132,6 +140,65 @@ data class TxnDTO(
 data class TxnCreateResponse(val transaction: TxnDTO)
 
 data class TxnsResponse(val transactions: List<TxnDTO>)
+
+/* ---------------- 看板：账单周期聚合 ---------------- */
+
+/**
+ * 单卡当前账单周期聚合。
+ *
+ * 周期口径 = (上一还款日, 本还款日]，不是自然月。
+ * 只包含信用卡：储蓄卡 / 电子钱包无账单周期，不进看板。
+ */
+data class CycleCardDTO(
+    @JsonProperty("payment_method_id")
+    val paymentMethodId: Long,
+    @JsonProperty("payment_method_name")
+    val paymentMethodName: String,
+    @JsonProperty("method_type")
+    val methodType: String,
+    /** 口径标记，当前恒为 `cycle`；保留字段以便将来扩展 */
+    val basis: String,
+    /** 上一还款日（周期起点，不含） */
+    @JsonProperty("cycle_start")
+    val cycleStart: String,
+    /** 本还款日（周期终点，含） */
+    @JsonProperty("cycle_end")
+    val cycleEnd: String,
+    /** 距本还款日还剩几天（今天到期 = 0） */
+    @JsonProperty("days_to_due")
+    val daysToDue: Int,
+    @JsonProperty("spend_amount")
+    val spendAmount: String,
+    @JsonProperty("repay_amount")
+    val repayAmount: String,
+    /** 本期净占用 = 消费 − 还款 */
+    @JsonProperty("net_amount")
+    val netAmount: String,
+    @JsonProperty("spend_count")
+    val spendCount: Int,
+    @JsonProperty("repay_count")
+    val repayCount: Int,
+    @JsonProperty("current_used")
+    val currentUsed: String,
+    /** 该卡本期是否被人工标记为「已还清」（标记不计占用，仪表盘冻结成另一种颜色） */
+    val settled: Boolean,
+)
+
+/** 看板周期汇总：各卡本期消费之和（各卡周期不同，但都是"当前这一期"） */
+data class CycleSummaryDTO(
+    @JsonProperty("as_of")
+    val asOf: String,
+    @JsonProperty("total_spend")
+    val totalSpend: String,
+    @JsonProperty("total_repay")
+    val totalRepay: String,
+    @JsonProperty("total_net")
+    val totalNet: String,
+    /** 已被标记「已还清」的卡本期消费合计（这部分在仪表盘里冻结，不计入占用） */
+    @JsonProperty("settled_spend")
+    val settledSpend: String,
+    val cards: List<CycleCardDTO>,
+)
 
 /** 删除流水响应：删除后该卡已用金额 */
 data class TxnDeleteResponse(

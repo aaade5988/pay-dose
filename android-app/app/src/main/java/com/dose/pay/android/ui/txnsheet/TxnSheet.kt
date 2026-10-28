@@ -33,7 +33,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -92,6 +97,10 @@ fun TxnSheet(
     var errorMessage by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var amountFocused by remember { mutableStateOf(false) }
+    var noteFocused by remember { mutableStateOf(false) }
+    val amountFocus = remember { FocusRequester() }
+    val noteFocus = remember { FocusRequester() }
 
     // 默认卡片：优先取预选卡，否则取第一张
     LaunchedEffect(defaults, methods) {
@@ -205,41 +214,29 @@ fun TxnSheet(
             }
 
             // 金额
-            SheetField(label = "金额") {
-                Text("¥", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PayColors.TextMuted)
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                    BasicTextField(
-                        value = amount,
-                        onValueChange = {
-                            amount = Money.sanitizeAmountInput(it)
-                            errorMessage = ""
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        textStyle = TextStyle(
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PayColors.Text,
-                            textAlign = TextAlign.End,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        decorationBox = { inner ->
-                            Box {
-                                if (amount.isEmpty()) {
-                                    Text(
-                                        "0.00",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = PayColors.Care,
-                                        textAlign = TextAlign.End,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
-                                inner()
-                            }
-                        },
-                    )
-                }
+            SheetField(
+                label = "金额",
+                onClick = { amountFocus.requestFocus() },
+                focused = amountFocused,
+            ) {
+                Text(
+                    "¥",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (amountFocused) PayColors.Primary else PayColors.TextMuted,
+                )
+                SheetInput(
+                    value = amount,
+                    onValueChange = {
+                        amount = Money.sanitizeAmountInput(it)
+                        errorMessage = ""
+                    },
+                    placeholder = "0.00",
+                    focusRequester = amountFocus,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    onFocusChange = { amountFocused = it },
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             // 日期
@@ -249,35 +246,23 @@ fun TxnSheet(
             }
 
             // 备注
-            SheetField(label = "备注") {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                    BasicTextField(
-                        value = note,
-                        onValueChange = { if (it.length <= 50) note = it },
-                        singleLine = true,
-                        textStyle = TextStyle(
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = PayColors.Text,
-                            textAlign = TextAlign.End,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        decorationBox = { inner ->
-                            Box {
-                                if (note.isEmpty()) {
-                                    Text(
-                                        "如：数码产品（可选）",
-                                        fontSize = 13.sp,
-                                        color = PayColors.Care,
-                                        textAlign = TextAlign.End,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
-                                inner()
-                            }
-                        },
-                    )
-                }
+            // 注意：这里刻意不设 imeAction / keyboardActions。中文输入法（搜狗/百度/Gboard 拼音）
+            // 会把 Enter 或「完成」当作提交候选词，一旦被 clearFocus 抢走，组词直接作废——
+            // 表现就是「拼音打得出来，字进不去」。保持最简单的文本输入行为最稳。
+            SheetField(
+                label = "备注",
+                onClick = { noteFocus.requestFocus() },
+                focused = noteFocused,
+            ) {
+                SheetInput(
+                    value = note,
+                    onValueChange = { if (it.length <= 50) note = it },
+                    placeholder = "如：数码产品（可选）",
+                    focusRequester = noteFocus,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    onFocusChange = { noteFocused = it },
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             // 余额预览
@@ -409,26 +394,95 @@ private fun buildPreview(card: MethodDto?, type: String, amount: String): Previe
 @Composable
 private fun SheetField(
     label: String,
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    focused: Boolean = false,
     trailing: @Composable RowScope.() -> Unit,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(PayColors.Surface)
-            .border(1.dp, PayColors.LineSoft, RoundedCornerShape(8.dp))
+            .background(if (focused) Color(0xFFFBF9FF) else PayColors.Surface)
+            .border(
+                width = 1.dp,
+                color = if (focused) PayColors.Primary else PayColors.LineSoft,
+                shape = RoundedCornerShape(8.dp),
+            )
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(label, fontSize = 14.sp, color = Color(0xFF43404C))
+        Text(
+            label,
+            fontSize = 14.sp,
+            fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
+            color = if (focused) PayColors.Primary else Color(0xFF43404C),
+        )
         Row(
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
             content = trailing,
+        )
+    }
+}
+
+/**
+ * 行内单行输入（金额 / 备注共用）。
+ *
+ * 关键点：`BasicTextField` 内部的文本布局宽度会收缩到文字宽度，
+ * 所以只在 [TextStyle] 上写 `textAlign = End` 并不能真的右对齐——光标会停在行首，
+ * 和右侧的占位符各站一边，看起来像「写不进去」。这里用一层
+ * `Box(fillMaxWidth, contentAlignment = CenterEnd)` 把文本布局顶到右端：
+ * 光标和文字都贴右边，占位符也在同一条基线上。
+ *
+ * [focusRequester] 由调用方持有：整行（含左侧标签）点击都要落到同一个输入框。
+ */
+@Composable
+private fun SheetInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    focusRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    onFocusChange: (Boolean) -> Unit = {},
+) {
+    // clipToBounds：备注写满一行时文本向左溢出，不裁会压到左侧标签上
+    Box(
+        modifier = modifier.fillMaxWidth().clipToBounds(),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        // 占位符是输入框的兄弟节点，不走 decorationBox：
+        // 少一层包裹，输入法组词时不会有额外的重新布局介入。
+        if (value.isEmpty()) {
+            Text(
+                placeholder,
+                fontSize = 13.sp,
+                color = PayColors.Care,
+                maxLines = 1,
+                textAlign = TextAlign.End,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            keyboardOptions = keyboardOptions,
+            cursorBrush = SolidColor(PayColors.Primary),
+            textStyle = TextStyle(
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = PayColors.Text,
+                textAlign = TextAlign.End,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { onFocusChange(it.isFocused) },
         )
     }
 }

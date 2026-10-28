@@ -6,6 +6,7 @@ import com.dose.pay.api.MethodInput
 import com.dose.pay.api.OkResponse
 import com.dose.pay.api.PlannerService
 import com.dose.pay.api.RecommendRequest
+import com.dose.pay.api.SettleRequest
 import com.dose.pay.api.TxnInput
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -35,7 +36,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException
  * | POST   | /api/methods | 201 {method} |
  * | PUT    | /api/methods/{id} | {method} |
  * | DELETE | /api/methods/{id} | {ok:true} |
+ * | PUT    | /api/methods/{id}/settle | {method} 标记/取消「已还清」（不写流水） |
  * | POST   | /api/recommend | {results:[RecItem]} |
+ * | GET    | /api/cycle | {cycle:{as_of,total_spend,repay,net,cards:[CycleCardDTO]}} |
  * | POST   | /api/transactions | 201 {transaction} |
  * | GET    | /api/transactions | {transactions:[TxnDTO]} |
  * | DELETE | /api/transactions/{id} | {ok, card_current_used} |
@@ -70,10 +73,30 @@ class PlannerController(private val plannerService: PlannerService) {
         return OkResponse(ok = true)
     }
 
+    /**
+     * 标记 / 取消「已还清」（人工标记，不写流水）。
+     *
+     * 标记后该卡本期消费在看板显示为「已还清」，仪表盘里对应份额被冻结成另一种颜色，
+     * 标记在本期还款日后自动失效。
+     */
+    @PutMapping("/methods/{id}/settle")
+    fun settleMethod(@PathVariable id: Long, @RequestBody body: SettleRequest): Any =
+        mapOf("method" to plannerService.setSettled(id, body.settled))
+
     // -------------------- 推荐 --------------------
 
     @PostMapping("/recommend")
     fun recommend(@Valid @RequestBody body: RecommendRequest): Any = plannerService.recommend(body)
+
+    // -------------------- 看板（账单周期口径） --------------------
+
+    /**
+     * 看板周期汇总：各卡「上一还款日 → 本还款日」的消费 / 还款 / 净占用。
+     *
+     * 只读接口，不落库；口径唯一事实源在后端 Calculator，客户端不再自行按自然月聚合。
+     */
+    @GetMapping("/cycle")
+    fun getCycle(): Any = mapOf("cycle" to plannerService.cycleSummary())
 
     // -------------------- 消费流水 --------------------
 

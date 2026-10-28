@@ -228,4 +228,67 @@ class CalculatorTest {
         assertEquals(BigDecimal("-200.00"), Calculator.availableLimit(BigDecimal("1000"), BigDecimal("1200")))
         assertEquals(null, Calculator.availableLimit(null, BigDecimal("1200")))
     }
+
+    // ---------- 账单周期窗口（看板口径：上一还款日 → 本还款日） ----------
+
+    /** 今天在周期中间：窗口 = (上一还款日, 本还款日] */
+    @Test
+    fun `cycle window covers current period`() {
+        val c = card(1, "民生", statementDay = 1, dueDay = 21)
+        val window = Calculator.cycleWindow(LocalDate.of(2026, 10, 30), c)!!
+        assertEquals(LocalDate.of(2026, 10, 21), window.first)
+        assertEquals(LocalDate.of(2026, 11, 21), window.second)
+    }
+
+    /** 还款日已过 → 显示进行中的下一期，而不是刚结束的那期 */
+    @Test
+    fun `cycle window rolls forward after due date`() {
+        val c = card(1, "民生", statementDay = 1, dueDay = 21)
+        // 10-22 刚过 10-21 还款日，应看到 10-21 → 11-21
+        val window = Calculator.cycleWindow(LocalDate.of(2026, 10, 22), c)!!
+        assertEquals(LocalDate.of(2026, 10, 21), window.first)
+        assertEquals(LocalDate.of(2026, 11, 21), window.second)
+    }
+
+    /** 还款日当天算下一期：当天消费的还款日已滚到下一期 */
+    @Test
+    fun `spend on due date belongs to next cycle`() {
+        val c = card(1, "民生", statementDay = 1, dueDay = 21)
+        val due = LocalDate.of(2026, 11, 21)
+        // 还款日当天消费 → 归入再下一期（12-21），不属于 11-21 这一期
+        assertEquals(LocalDate.of(2026, 12, 21), Calculator.cycleEndFor(due, c))
+        // 账单日（11-01）之前消费 → 归入 11-21
+        assertEquals(LocalDate.of(2026, 11, 21), Calculator.cycleEndFor(LocalDate.of(2026, 10, 31), c))
+    }
+
+    /** 月末钳制：31 日还款日的卡在 2 月不会算出不存在的日期 */
+    @Test
+    fun `cycle window clamps at month end`() {
+        val c = card(1, "工商", statementDay = 1, dueDay = 31)
+        val window = Calculator.cycleWindow(LocalDate.of(2026, 2, 15), c)!!
+        // 2-15 已过 2-01 账单日 → 归 3 月账单，还款日 3-31
+        assertEquals(LocalDate.of(2026, 3, 31), window.second)
+        // 上一还款日在 2 月，31 日被钳制到 28 日
+        assertEquals(LocalDate.of(2026, 2, 28), window.first)
+    }
+
+    /** 周期窗口长度合理：28–31 天，不会因反推死循环 */
+    @Test
+    fun `cycle window length is one month`() {
+        val c = card(1, "平安", statementDay = 6, dueDay = 24)
+        var day = LocalDate.of(2026, 1, 1)
+        repeat(400) {
+            val w = Calculator.cycleWindow(day, c)!!
+            val span = java.time.temporal.ChronoUnit.DAYS.between(w.first, w.second)
+            assertTrue(span in 28..31, "周期长度异常：$day -> $w（$span 天）")
+            day = day.plusDays(1)
+        }
+    }
+
+    /** 非信用卡没有账单周期 */
+    @Test
+    fun `non credit card has no cycle`() {
+        val debit = card(1, "储蓄卡", type = Calculator.DEBIT_CARD, statementDay = null, dueDay = null)
+        assertEquals(null, Calculator.cycleWindow(LocalDate.of(2026, 10, 30), debit))
+    }
 }

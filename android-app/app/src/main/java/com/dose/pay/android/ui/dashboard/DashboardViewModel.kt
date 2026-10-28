@@ -1,49 +1,22 @@
 package com.dose.pay.android.ui.dashboard
 
-import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dose.pay.android.core.AggUsage
+import com.dose.pay.android.core.CycleAgg
+import com.dose.pay.android.core.Cycles
 import com.dose.pay.android.core.DashRow
-import com.dose.pay.android.core.Dates
 import com.dose.pay.android.core.Methods
-import com.dose.pay.android.core.Money
-import com.dose.pay.android.core.Txns
 import com.dose.pay.android.data.ApiError
+import com.dose.pay.android.data.CycleSummaryDto
 import com.dose.pay.android.data.MethodDto
 import com.dose.pay.android.data.PlannerRepository
-import com.dose.pay.android.data.TxnDto
-import com.dose.pay.android.data.TxnInput
 import com.dose.pay.android.data.UiEventBus
-import com.dose.pay.android.ui.theme.PayColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-
-/** 「更新已用」半屏弹层状态 */
-data class UpdateSheetState(
-    val methodId: Long,
-    val name: String,
-    val methodType: String,
-    val initial: String,
-    val color: Color,
-    val hasLimit: Boolean,
-    val limitText: String,
-    val usedText: String,
-    val availText: String,
-    val currentUsed: String,
-    val input: String = "",
-    val pct: Double? = null,
-    val arc: Float = 0f,
-    val ringColor: Color = PayColors.RingTrack,
-    val pctText: String = "—",
-    val overText: String = "",
-    val error: String = "",
-    val saving: Boolean = false,
-)
 
 /** 看板页状态 */
 data class DashboardUiState(
@@ -51,13 +24,23 @@ data class DashboardUiState(
     val refreshing: Boolean = false,
     val errorMessage: String = "",
     val rows: List<DashRow> = emptyList(),
-    val agg: AggUsage = Methods.aggregateUsage(emptyList()),
-    val methodList: List<MethodDto> = emptyList(),
-    val sheet: UpdateSheetState? = null,
+    /** 顶部环：本账单周期消费合计 ÷ Σ已设额度（与下方逐卡「本期消费」同源） */
+    val gauge: AggUsage = Methods.cycleGauge(emptyList(), 0L),
+    /** 本账单周期聚合（上一还款日 → 本还款日） */
+    val cycle: CycleAgg = Cycles.aggregate(CycleSummaryDto()),
+    /** 周期接口单独失败时的提示；额度数据仍可正常展示 */
+    val cycleError: String = "",
 )
 
 /**
- * 额度看板页（Tab3）ViewModel：聚合仪表盘 + 单卡缺口环 + 「更新已用」半屏。
+ * 额度看板页（Tab3）ViewModel：本期聚合仪表盘 + 本账单周期。
+ *
+ * 全页统一走「本期」口径：
+ * - 顶部环（[DashboardUiState.gauge]）= 本期消费合计 ÷ Σ已设额度；
+ * - 下方逐卡行（[DashboardUiState.cycle]）= 只统计「上一还款日 → 本还款日」。
+ *
+ * 两者同源，本期一笔没刷时环就是 0%。跨周期累积的 `current_used`
+ * 只出现在「余额详情」弹层里（它不等于本期消费，2026-10-28 起不再上环）。
  */
 class DashboardViewModel(
     private val repository: PlannerRepository,
@@ -69,184 +52,68 @@ class DashboardViewModel(
 
     private var rawMethods: List<MethodDto> = emptyList()
 
+    /** 「已还清」请求进行中（防重复点击） */
+    private var settling = false
+
     fun load() {
         _state.update { it.copy(loading = it.rows.isEmpty(), refreshing = true, errorMessage = "") }
         viewModelScope.launch {
             try {
                 val list = repository.listMethods()
                 rawMethods = list
-                _state.update {
-                    it.copy(
+                _state.update { st ->
+                    st.copy(
                         loading = false,
                         refreshing = false,
                         errorMessage = "",
                         rows = list.map(Methods::toDashRow),
-                        agg = Methods.aggregateUsage(list),
-                        methodList = list,
+                        gauge = Methods.cycleGauge(list, st.cycle.totalSpendCents, st.cycle.settledSpendCents),
                     )
                 }
             } catch (e: ApiError) {
                 _state.update { it.copy(loading = false, refreshing = false, errorMessage = e.message) }
+                return@launch
+            }
+            // 周期数据独立加载：失败只降级提示，不影响卡片数据
+            try {
+                val cycle = Cycles.aggregate(repository.cycleSummary())
+                _state.update {
+                    it.copy(
+                        cycle = cycle,
+                        gauge = Methods.cycleGauge(rawMethods, cycle.totalSpendCents, cycle.settledSpendCents),
+                        cycleError = "",
+                    )
+                }
+            } catch (e: ApiError) {
+                _state.update { it.copy(cycleError = e.message) }
             }
         }
     }
 
     private fun rawOf(id: Long): MethodDto? = rawMethods.firstOrNull { it.id == id }
 
-    /* ────────────── 更新已用半屏 ────────────── */
-
-    fun openSheet(id: Long) {
-        val raw = rawOf(id) ?: return
-        val row = Methods.toDashRow(raw)
-        _state.update {
-            it.copy(
-                sheet = UpdateSheetState(
-                    methodId = raw.id,
-                    name = raw.name,
-                    methodType = raw.methodType,
-                    initial = row.initial,
-                    color = row.color,
-                    hasLimit = row.hasLimit,
-                    limitText = row.limitText,
-                    usedText = row.usedText,
-                    availText = row.availText,
-                    currentUsed = row.currentUsed,
-                    input = if (row.currentUsed == "0") "0" else row.currentUsed,
-                )
-            )
-        }
-        recomputeSheet()
-    }
-
-    fun closeSheet() {
-        _state.update { it.copy(sheet = null) }
-    }
-
-    /** 逐键清洗金额 */
-    fun onSheetInput(raw: String) {
-        val fixed = Money.sanitizeAmountInput(raw)
-        _state.update { st ->
-            val sheet = st.sheet ?: return@update st
-            st.copy(sheet = sheet.copy(input = fixed, error = ""))
-        }
-        recomputeSheet()
-    }
-
-    /** 输入值 -> 迷你环实时预览 + 超限告警（分整数运算） */
-    private fun recomputeSheet() {
-        val sheet = _state.value.sheet ?: return
-        val raw = rawOf(sheet.methodId) ?: return
-        val limitC = if (Methods.limitSet(raw)) Money.toCents(raw.creditLimit) else null
-        val inputC = Money.toCents(sheet.input) ?: 0L
-        if (limitC == null || limitC <= 0L) {
-            _state.update {
-                it.copy(
-                    sheet = sheet.copy(
-                        pct = null,
-                        arc = 0f,
-                        ringColor = PayColors.RingTrack,
-                        pctText = "—",
-                        overText = "",
-                    )
-                )
-            }
-            return
-        }
-        val pct = Math.round(inputC * 1000.0 / limitC) / 10.0
-        val status = Methods.usageStatus(pct)
-        _state.update {
-            it.copy(
-                sheet = sheet.copy(
-                    pct = pct,
-                    arc = Methods.ringArc(pct),
-                    ringColor = status.color,
-                    pctText = Math.round(pct).toInt().toString() + "%",
-                    overText = if (inputC > limitC) {
-                        "超额度 " + Money.moneyCompact(Money.fromCents(inputC - limitC))
-                    } else {
-                        ""
-                    },
-                )
-            )
-        }
-    }
-
-    /** 保存：PUT 全量回传原字段 + 新 current_used（超限允许） */
-    fun saveSheet() {
-        val sheet = _state.value.sheet ?: return
-        if (sheet.saving) return
-        val raw = rawOf(sheet.methodId)
-        if (raw == null) {
-            _state.update { it.copy(sheet = sheet.copy(error = "卡片已被删除，请下拉刷新")) }
-            return
-        }
-        var used = Money.finalizeAmountInput(sheet.input)
-        if (used.isEmpty()) used = "0"
-        if (used == raw.currentUsed || Money.toCents(used) == Money.toCents(raw.currentUsed)) {
-            events.show("数值未变化")
-            closeSheet()
-            return
-        }
-        val payload = com.dose.pay.android.data.MethodInput(
-            name = raw.name,
-            methodType = raw.methodType,
-            creditLimit = raw.creditLimit,
-            currentUsed = used,
-            statementDay = raw.statementDay,
-            dueDay = raw.dueDay,
-            dueDaysAfterStatement = raw.dueDaysAfterStatement,
-            statementDayInclusive = raw.statementDayInclusive,
-        )
-        _state.update { it.copy(sheet = sheet.copy(saving = true, error = "")) }
+    /**
+     * 看板周期卡左滑「已还清 / 取消标记」。
+     *
+     * 这是**人工标记**（后端 `PUT /api/methods/{id}/settle`）：
+     * - 不写任何流水、不动已用余额；
+     * - 标记后该卡本期消费在看板显示「已还清」，仪表盘里那一段冻结成另一种颜色；
+     * - 标记有效期 = 本期还款日，过了自动失效。
+     */
+    fun setSettled(methodId: Long, settled: Boolean) {
+        if (settling) return
+        val raw = rawOf(methodId) ?: return
+        settling = true
         viewModelScope.launch {
             try {
-                repository.updateMethod(raw.id, payload)
-                _state.update { it.copy(sheet = sheet.copy(saving = false)) }
-                closeSheet()
-                events.show("已更新 · 环形重算")
+                repository.setMethodSettled(methodId, settled)
+                events.show(if (settled) "已标记已还清 · " + raw.name else "已取消标记 · " + raw.name)
                 load()
             } catch (e: ApiError) {
-                _state.update { it.copy(sheet = sheet.copy(saving = false, error = e.message)) }
+                events.show(e.message)
+            } finally {
+                settling = false
             }
         }
-    }
-
-    /** 「按账单清零 / 记为已还清」：POST /api/transactions 还款，金额 = 当前已用 */
-    fun repayAll(note: String) {
-        val sheet = _state.value.sheet ?: return
-        if (sheet.saving) return
-        val raw = rawOf(sheet.methodId) ?: return
-        val usedC = Money.toCents(raw.currentUsed) ?: 0L
-        if (usedC <= 0L) {
-            events.show("当前无占用 · 无需还款")
-            return
-        }
-        _state.update { it.copy(sheet = sheet.copy(saving = true, error = "")) }
-        viewModelScope.launch {
-            try {
-                repository.createTransaction(
-                    TxnInput(
-                        paymentMethodId = raw.id,
-                        type = Txns.TYPE_REPAY,
-                        amount = Money.fromCents(usedC),
-                        txnDate = Dates.toStr(Dates.today()),
-                        note = note,
-                    )
-                )
-                _state.update { it.copy(sheet = sheet.copy(saving = false)) }
-                closeSheet()
-                events.show("已记还款 · 余额归零")
-                load()
-            } catch (e: ApiError) {
-                _state.update { it.copy(sheet = sheet.copy(saving = false, error = e.message)) }
-            }
-        }
-    }
-
-    /** 看板内「记一笔」：提交流水 */
-    suspend fun createTransaction(body: TxnInput): TxnDto = repository.createTransaction(body)
-
-    fun onTxnCreated(name: String) {
-        events.show("已记入 " + name)
     }
 }

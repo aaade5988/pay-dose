@@ -36,15 +36,22 @@ data class DashRow(
     val statusChip: ChipStyle,
 )
 
-/** 聚合仪表盘模型 */
+/** 聚合仪表盘模型（看板顶部环：本期消费 ÷ Σ已设额度） */
 data class AggUsage(
     val count: Int,
     val limitedCount: Int,
     val hasLimited: Boolean,
+    /** 占用率 = (本期消费 − 已还清) ÷ Σ已设额度 */
     val pct: Double?,
     val pctText: String,
+    /** 主色弧长（占用部分） */
     val gaugeP: Float,
+    /** 冻结弧长（已还清部分，另一种颜色） */
+    val frozenP: Float,
     val usedText: String,
+    /** 已还清金额（冻结，不计入占用） */
+    val settledText: String,
+    val hasSettled: Boolean,
     val limitText: String,
     val subText: String,
 )
@@ -52,6 +59,9 @@ data class AggUsage(
 /**
  * 支付方式领域工具（移植自原小程序 utils/method.js）。
  * 真正的推荐算法在后端 /api/recommend，这里只做展示层的日期辅助与聚合。
+ *
+ * 注：原看板「单卡占用」区块已下线，[DashRow]/[toDashRow] 仅保留给
+ * 「更新已用」弹层取当前已用与额度，不再驱动页面列表渲染。
  */
 object Methods {
 
@@ -203,21 +213,32 @@ object Methods {
     }
 
     /**
-     * 聚合仪表盘口径：Σ已用 / Σ额度（分整数），仅「已设额度且额度 > 0」的卡参与。
+     * 聚合仪表盘口径：**本账单周期消费合计 / Σ已设额度**（分整数）。
+     *
+     * 分母只算「已设额度且额度 > 0」的卡。分子用本期消费而不是 Σcurrent_used：
+     * 后者跨周期累积，会出现「本期一笔没刷、环里却显示有钱」的错读
+     * （2026-10-28 用户反馈：环 222 与下方本期 0 打架）。
+     *
+     * 「已还清」是人工标记：[settledCents] 是被标记卡的本期消费，
+     * 它们**冻结**在环上（另一种颜色），不再计入占用率：
+     * 占用率 = (本期消费 − 已还清) ÷ Σ额度。
      */
-    fun aggregateUsage(methods: List<MethodDto>): AggUsage {
-        var usedC = 0L
+    fun cycleGauge(methods: List<MethodDto>, spendCents: Long, settledCents: Long = 0L): AggUsage {
         var limitC = 0L
         var limitedCount = 0
         for (m in methods) {
             if (!limitSet(m)) continue
             val l = Money.toCents(m.creditLimit) ?: continue
             if (l <= 0L) continue
-            usedC += Money.toCents(m.currentUsed) ?: 0L
             limitC += l
             limitedCount++
         }
+        val spendC = spendCents.coerceAtLeast(0L)
+        val settledC = settledCents.coerceIn(0L, spendC)
+        val usedC = spendC - settledC
         val pct = if (limitC > 0L) Math.round(usedC * 1000.0 / limitC) / 10.0 else null
+        val frozenPct = if (limitC > 0L) Math.round(settledC * 1000.0 / limitC) / 10.0 else null
+        val settledText = Money.moneyCompact(Money.fromCents(settledC))
         return AggUsage(
             count = methods.size,
             limitedCount = limitedCount,
@@ -225,9 +246,13 @@ object Methods {
             pct = pct,
             pctText = if (pct == null) "—" else Math.round(pct).toInt().toString() + "%",
             gaugeP = ringArc(pct),
+            frozenP = ringArc(frozenPct),
             usedText = Money.moneyCompact(Money.fromCents(usedC)),
+            settledText = settledText,
+            hasSettled = settledC > 0L,
             limitText = Money.moneyCompact(Money.fromCents(limitC)),
-            subText = "仅计入 " + limitedCount + "/" + methods.size + " 张设额度 · 不限额卡以虚线灰环单列",
+            subText = "本期消费 ÷ Σ已设额度 · 仅计入 " + limitedCount + "/" + methods.size + " 张设额度卡" +
+                if (settledC > 0L) " · 已还清 " + settledText + " 已冻结（不计入占用）" else "",
         )
     }
 

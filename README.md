@@ -4,90 +4,81 @@
 
 输入一笔大额支付和日期，自动推算各支付方式的预计还款日，按**资金占用天数降序**推荐，尽量晚还钱。
 
+## 架构现状：纯本地 App（Local-first）
+
+> **2026-10 改造**：原先「App + Spring Boot 后端」的 Client-Server 结构已改为**纯本地单进程**。
+> 数据存放在手机内 Room 数据库，算法全部在 App 内，**离线可用、出门能用、更新不丢数据**。
+
+```
+改造前（两进程，需联网）          改造后（单进程，纯本地）
+┌──────────┐    HTTP    ┌──────────┐      ┌─────────────────────┐
+│ App      │ ─────────> │ Spring   │      │  pay-dose APK       │
+│ (哑终端) │            │ Boot     │      │  ├── ui/   Compose  │
+│ 无数据   │            │ 338 MB   │      │  ├── Repository     │
+│ 无算法   │            │ 数据在这 │      │  ├── Room ─> SQLite │
+└──────────┘            └──────────┘      │  └── core/  算法    │
+                                          └─────────────────────┘
+```
+
+| 维度 | 改造后 |
+|---|---|
+| 进程数 | 1（只有 App） |
+| 数据位置 | `/data/data/com.dose.pay.android/databases/pay-dose.db` |
+| 网络依赖 | 无（`INTERNET` 权限仅保留给将来的更新检查） |
+| 升级丢数据风险 | **零**（签名不变 + Room 迁移） |
+| 后端内存 | 从 338 MB 降到 ~3 MB |
+
+### 保留的 backend/ 目录
+
+`backend/` **代码完整保留**，但不再打包、不再发版、不再是运行时依赖。它现在的用途：
+
+1. **数据备份源**：改造前的真实数据出处
+2. **迁移工具**：`com.dose.pay.tools.Migrator`
+3. **行为规格参考**：42 个接口测试 + 19 个算法单测，是 App 侧实现的对照标准
+
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Kotlin + Spring Boot 3 + Spring Data JPA |
-| 数据库 | SQLite（单文件，零运维） |
 | 客户端 | Kotlin + Jetpack Compose + Material 3（Android） |
-| 构建 | Maven（后端） / Gradle（Android） |
-
-单用户单机应用：无登录、无服务端部署负担，数据存本地 SQLite 文件。
+| 本地存储 | Room（Android 内置 SQLite 的类型安全封装） |
+| 算法 | 纯 Kotlin，`android-app/.../core/Calculator.kt` |
+| 构建 | Gradle（Android） |
+| 后端（仅参考） | Kotlin + Spring Boot 3 + Spring Data JPA |
 
 ## 目录
 
 ```
 pay-dose/
-├── backend/                  # Kotlin + Spring Boot 后端
-│   ├── pom.xml
-│   ├── scripts/e2e_smoke.py  # 端到端冒烟（42 断言）
-│   ├── src/main/kotlin/com/dose/pay/
-│   │   ├── domain/           # 算法核心 + 实体 + 仓储
-│   │   ├── api/              # DTO + 业务服务
-│   │   ├── web/              # REST 路由 + 全局异常映射
-│   │   ├── config/           # Jackson 严格反序列化 + SQLite 目录初始化
-│   │   └── tools/            # 数据迁移工具（Migrator + CLI）
-│   └── src/test/             # 算法 19 + 接口 39 + 迁移 5 + 兼容 1
-├── android-app/              # Android Compose 客户端（37 文件 5578 行）
-│   └── app/src/main/java/com/dose/pay/android/
-│       ├── core/             # 金额「分」运算 + 环形算法 + 日期工具
-│       ├── data/             # DTO + Retrofit + Repository
-│       └── ui/               # calc / cards / cardedit / dashboard / flow / profile
+├── android-app/              # Android 客户端（主战场）
+│   ├── keystore/             # release 签名（不进 git，务必自行备份！）
+│   └── app/src/main/
+│       ├── assets/seed-data.json   # 首次启动导入的初始数据
+│       └── java/com/dose/pay/android/
+│           ├── core/         # 算法核心（Calculator 等，纯 Kotlin）
+│           ├── data/         # DTO + Repository + 设置
+│           │   └── local/    # Room: Entity / DAO / Database / 业务服务
+│           └── ui/           # Compose 界面（calc/cards/dashboard/bills/...）
+├── backend/                  # Spring Boot 后端（保留为备份/迁移/参考，不参与发布）
+├── data/                     # 后端运行期数据与导出备份（不进 git）
 ├── docs/
-│   ├── android-spec.md       # Android 实现规格书
-│   ├── migration.md          # 数据迁移指南
-│   └── progress.md           # 开发进度与踩坑记录
-└── scripts/run.py            # 一键启动后端
+└── scripts/
 ```
 
 ## 验收状态
 
 | 层级 | 数量 | 结果 |
 |---|---|---|
-| 算法单测 | 19 | ✅ |
-| 接口集成（SQLite） | 39 | ✅ |
-| 迁移工具 | 5 | ✅ |
-| 迁移后兼容 | 1 | ✅ |
-| **JUnit 合计** | **64** | ✅ |
-| 端到端冒烟 | 42 断言 | ✅ |
-| Android 构建 | assembleDebug | ✅ 17MB APK |
+| App 算法单测（CalculatorTest） | 20 | ✅ |
+| 黄金快照对账（与后端逐字段对比） | 5 | ✅ |
+| **App 侧测试合计** | **25** | ✅ |
+| 真机/模拟器功能验证 | 4 个页面 | ✅ 数据全部正确 |
+| Release APK | 10.87 MB | ✅ v2 签名通过 |
+| 后端 JUnit（保留参考） | 64 | ✅ |
 
 ## 快速开始
 
-### 后端
-
-前置：JDK 17、Maven 3.6+
-
-```powershell
-cd backend
-
-# 必须指定 JDK 17（系统默认可能是 1.8）
-$env:JAVA_HOME = "D:\Program Files\Java\jdk-17"
-$env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
-
-mvn -B -DskipTests package
-java -jar target/pay-dose.jar
-```
-
-服务起在 `http://127.0.0.1:8000`，SQLite 文件自动创建在 `backend/data/pay-dose.db`。
-
-冒烟验证：
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/api/health
-```
-
-### 跑测试
-
-```powershell
-cd backend
-mvn -B test                                    # 全部
-mvn -B test -Dtest=CalculatorTest              # 仅算法（无需数据库）
-mvn -B test -Dtest=PlannerApiTest              # 仅接口（SQLite 临时库）
-```
-
-### Android
+### Android（唯一需要构建的东西）
 
 前置：Android SDK（platform 36 + build-tools）、JDK 17
 
@@ -97,37 +88,63 @@ cd android-app
 $env:JAVA_HOME = "D:\Program Files\Java\jdk-17"
 $env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
 
-.\gradlew.bat assembleDebug
+.\gradlew.bat assembleRelease
 ```
 
-APK 产出在 `app/build/outputs/apk/debug/app-debug.apk`（约 17 MB）。
+APK 产出在 `app/build/outputs/apk/release/app-release.apk`。
 
-安装到模拟器或真机：
+安装：
 
 ```powershell
-adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r app\build\outputs\apk\release\app-release.apk
 adb shell am start -n com.dose.pay.android/.MainActivity
 ```
 
 > `local.properties` 需写 `sdk.dir=E\:\\Android\\Sdk`（指向你自己的 SDK 路径）。
 > 该文件已被 `.gitignore` 忽略，换机器需重新配置。
 
-**模拟器访问宿主机后端**：App 里默认 Base URL 是 `http://10.0.2.2:8000`（`10.0.2.2` 是 Android 模拟器映射宿主机的地址）。如果后端跑在别的端口或用真机调试，在「我的」页里改 Base URL 即可。
-
 ### 跑测试
 
 ```powershell
-cd backend
-mvn -B test                                    # 全部（64 个用例）
-mvn -B test -Dtest=CalculatorTest              # 仅算法（无需数据库）
-mvn -B test -Dtest=PlannerApiTest              # 仅接口（SQLite 临时库）
+cd android-app
+.\gradlew.bat testDebugUnitTest          # 25 个用例（纯 JVM，无需设备）
 ```
 
-### 端到端冒烟（需后端已启动）
+### 签名（重要）
+
+Release 签名文件在 `android-app/keystore/pay-dose.jks`，密码默认 `paydose2026`
+（可用环境变量 `PAYDOSE_KEYSTORE_PASSWORD` / `PAYDOSE_KEY_PASSWORD` 覆盖）。
+
+**这个文件必须永久保存、永不更换。** Android 判断「是不是同一个 App」看的是
+`applicationId + 签名证书`。换签名会导致：
+
+- 系统拒绝覆盖安装，只能卸载重装
+- **卸载会清掉本地数据库，全部数据丢失**
+
+请立刻备份到至少两处（U 盘 / 云盘 / 密码管理器）。当前签名指纹：
+
+```
+SHA-256: 33e7632f7726232c21ae1649426bee04c32a5de379860941131d7bd55adc37cc
+```
+
+### 后端（可选，仅用于数据迁移 / 查阅）
+
+前置：JDK 17、Maven 3.6+
 
 ```powershell
 cd backend
-python scripts/e2e_smoke.py
+$env:JAVA_HOME = "D:\Program Files\Java\jdk-17"
+$env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
+
+mvn -B -DskipTests package
+java -jar target/pay-dose.jar
+```
+
+服务起在 `http://127.0.0.1:8000`，SQLite 文件在 `backend/data/pay-dose.db`。
+
+```powershell
+mvn -B test                                    # 全部（64 个用例）
+mvn -B test -Dtest=CalculatorTest              # 仅算法（无需数据库）
 ```
 
 ### 从原项目迁移数据
@@ -141,6 +158,7 @@ java -cp target/pay-dose.jar com.dose.pay.tools.MainKt --source sqlite --source-
 # 确认后正式迁移
 java -cp target/pay-dose.jar com.dose.pay.tools.MainKt --source sqlite --source-file "<旧库路径>" --truncate
 ```
+
 
 ## 核心算法
 
@@ -190,12 +208,26 @@ java -cp target/pay-dose.jar com.dose.pay.tools.MainKt --source sqlite --source-
 | PUT | `/api/methods/{id}` | 更新（不存在 404） |
 | DELETE | `/api/methods/{id}` | 删除（有流水 409） |
 | POST | `/api/recommend` | 生成推荐（只算不落库） |
+| GET | `/api/cycle` | 看板：各卡当前账单周期消费（上一还款日 → 本还款日） |
 | POST | `/api/transactions` | 记一笔（同事务改余额） |
 | GET | `/api/transactions` | 流水列表（分页/筛选） |
 | DELETE | `/api/transactions/{id}` | 删除流水（同事务回滚余额） |
 
 金额一律 JSON **字符串**（`"10000.00"`）；日期 `"YYYY-MM-DD"`。
 错误体 `{"detail": "中文说明"}`；类型错误返回 422 并附 `errors` 明细。
+
+### `/api/cycle` 的统计口径
+
+看板**不按自然月**统计，而是按每张信用卡自己的账单周期：
+
+- 区间 `(上一还款日, 本还款日]`，左开右闭；
+- 一笔消费算哪一期，**由它的还款日决定**（`Calculator.calculateDueDate`），
+  所以月末钳制、跨年、`statement_day_inclusive` 都不会算歪；
+- 还款日当天刷的算**下一期**（它的还款日已经滚过去了）；
+- 还款日已过的卡显示**进行中的下一期**，不显示刚出账那期；
+- 储蓄卡 / 电子钱包没有账单周期，**不进看板、不进合计**；
+- 顶层 `total_spend` 是「各卡本期消费之和」——各卡还款日不同，周期区间天然不一致，
+  不能理解成某个统一日期区间的合计。
 
 ## 免责声明
 

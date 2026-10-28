@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import java.math.BigDecimal
+import java.time.LocalDate
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -509,5 +510,63 @@ class PlannerApiTest {
         val id = createCardId("大额卡", "999999999999.99")
         assertEquals(201, postTxn(id, "消费", "123456789012.34").response.status)
         assertEquals(0, BigDecimal("123456789012.34").compareTo(currentUsedOf(id)))
+    }
+
+    // -------------------- 看板：账单周期口径 --------------------
+
+    @Test
+    fun `cycle summary aggregates current period only`() {
+        val id = createCardId("周期卡", "50000.00", statementDay = 10, dueDay = 25)
+        val today = LocalDate.now()
+        // 今天消费必然落在本期（还款日 = 本还款日）
+        postTxn(id, "消费", "100.00", date = today.toString())
+        postTxn(id, "消费", "50.50", date = today.toString())
+        // 三个月前的消费属于更早的周期，不应计入本期
+        postTxn(id, "消费", "999.00", date = today.minusMonths(3).toString())
+        postTxn(id, "还款", "10.00", date = today.toString())
+
+        val result = mockMvc.perform(get("/api/cycle")).andReturn()
+        assertEquals(200, result.response.status, result.response.getContentAsString(Charsets.UTF_8))
+
+        val cycle = objectMapper.readTree(result.response.contentAsString)["cycle"]
+        assertEquals(today.toString(), cycle["as_of"].asText())
+        // 本期消费 = 150.50，那笔 999 属于旧周期
+        assertEquals("150.50", cycle["total_spend"].asText())
+        assertEquals("10.00", cycle["total_repay"].asText())
+        assertEquals("140.50", cycle["total_net"].asText())
+
+        val card = cycle["cards"].first { it["payment_method_id"].asLong() == id }
+        assertEquals("cycle", card["basis"].asText())
+        assertEquals("150.50", card["spend_amount"].asText())
+        assertEquals(2, card["spend_count"].asInt())
+        assertEquals(1, card["repay_count"].asInt())
+        // 周期区间必须完整且终点在今天之后（还款日当天 = 0）
+        val end = LocalDate.parse(card["cycle_end"].asText())
+        val start = LocalDate.parse(card["cycle_start"].asText())
+        assertTrue(start.isBefore(end), "周期起点必须早于终点：$start -> $end")
+        assertTrue(!end.isBefore(today), "本还款日不应早于今天：$end")
+        assertEquals(java.time.temporal.ChronoUnit.DAYS.between(today, end).toInt(), card["days_to_due"].asInt())
+    }
+
+    @Test
+    fun `cycle summary excludes non credit cards`() {
+        val creditId = createCardId("周期信用卡", "50000.00", statementDay = 10, dueDay = 25)
+        // 储蓄卡没有账单周期，不进看板
+        createCard("储蓄卡", limit = null, type = "储蓄卡", statementDay = null, dueDay = null, expect = 201)
+        postTxn(creditId, "消费", "20.00", date = LocalDate.now().toString())
+
+        val cycle = objectMapper.readTree(mockMvc.perform(get("/api/cycle")).andReturn().response.contentAsString)["cycle"]
+        val ids = cycle["cards"].map { it["payment_method_id"].asLong() }
+        assertEquals(listOf(creditId), ids)
+        assertEquals("20.00", cycle["total_spend"].asText())
+    }
+
+    @Test
+    fun `cycle summary empty when no cards`() {
+        val result = mockMvc.perform(get("/api/cycle")).andReturn()
+        assertEquals(200, result.response.status)
+        val cycle = objectMapper.readTree(result.response.contentAsString)["cycle"]
+        assertEquals(0, cycle["cards"].size())
+        assertEquals("0.00", cycle["total_spend"].asText())
     }
 }

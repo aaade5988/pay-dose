@@ -31,6 +31,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.dose.pay.android.data.AppContainer
+import com.dose.pay.android.ui.bills.BillsScreen
+import com.dose.pay.android.ui.bills.BillsViewModel
 import com.dose.pay.android.ui.calc.CalcScreen
 import com.dose.pay.android.ui.calc.CalcViewModel
 import com.dose.pay.android.ui.cardedit.CardEditScreen
@@ -39,12 +41,8 @@ import com.dose.pay.android.ui.cards.CardsScreen
 import com.dose.pay.android.ui.cards.CardsViewModel
 import com.dose.pay.android.ui.dashboard.DashboardScreen
 import com.dose.pay.android.ui.dashboard.DashboardViewModel
-import com.dose.pay.android.ui.flow.FlowScreen
-import com.dose.pay.android.ui.flow.FlowViewModel
 import com.dose.pay.android.ui.nav.Routes
 import com.dose.pay.android.ui.nav.TopLevel
-import com.dose.pay.android.ui.profile.ProfileScreen
-import com.dose.pay.android.ui.profile.ProfileViewModel
 import com.dose.pay.android.ui.theme.PayColors
 
 /** 底部导航未选中色 */
@@ -149,14 +147,13 @@ fun PayDoseRoot(container: AppContainer) {
                 val vm: DashboardViewModel = viewModel(factory = factory)
                 DashboardScreen(
                     vm = vm,
-                    onGoFlow = { navController.navigate(Routes.FLOW) },
                     onGoCards = { navController.navigate(Routes.CARDS) { launchSingleTop = true } },
                 )
             }
 
-            composable(Routes.PROFILE) {
-                val vm: ProfileViewModel = viewModel(factory = factory)
-                ProfileScreen(vm = vm)
+            composable(Routes.BILLS) {
+                val vm: BillsViewModel = viewModel(factory = factory)
+                BillsScreen(vm = vm)
             }
 
             composable(
@@ -171,14 +168,6 @@ fun PayDoseRoot(container: AppContainer) {
                 val vm: CardEditViewModel = viewModel(factory = factory)
                 val methodId = entry.arguments?.getLong("methodId") ?: -1L
                 CardEditScreen(vm = vm, methodId = methodId, onDone = { navController.popBackStack() })
-            }
-
-            composable(Routes.FLOW) {
-                val vm: FlowViewModel = viewModel(factory = factory)
-                FlowScreen(
-                    vm = vm,
-                    onGoCards = { navController.navigate(Routes.CARDS) { launchSingleTop = true } },
-                )
             }
         }
     }

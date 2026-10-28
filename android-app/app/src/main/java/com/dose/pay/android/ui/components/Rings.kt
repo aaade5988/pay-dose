@@ -94,6 +94,12 @@ fun GapRing(
 
 /**
  * 断开式环形仪表盘（看板聚合）：270° 弧 + 每 18° 一条 1.8° 的刻度断口。
+ *
+ * [frozenP] 是「已还清」冻结段：固定画在弧的**起点**（环的左下角 = 左侧起点），
+ * 用另一种颜色表示这部分钱已经还了、不再计入额度占用，但仍然占着环上的位置。
+ *
+ * 之所以锚在起点而不是「跟在主色弧后面」：跟在后面的话，占用率一变绿色段就跟着漂，
+ * 同一张卡在别的时候看会是两个位置。锚在左端则永远只看一个地方。
  */
 @Composable
 fun RingGauge(
@@ -101,6 +107,8 @@ fun RingGauge(
     modifier: Modifier = Modifier,
     diameter: Dp = 148.dp,
     strokeWidth: Dp = 14.dp,
+    frozenP: Float = 0f,
+    frozenColor: Color = PayColors.RepayGreen,
     gapColor: Color = PayColors.Surface,
     center: @Composable BoxScope.() -> Unit = {},
 ) {
@@ -120,12 +128,27 @@ fun RingGauge(
                 size = arcSize,
                 style = Stroke(width = stroke, cap = StrokeCap.Butt),
             )
+            // 冻结段（已还清）：锚在弧的左端，位置固定
+            val frozenSweep = (frozenP / 100f) * 360f
+            val frozen = frozenSweep.coerceIn(0f, FULL_SWEEP)
+            if (frozen > 0f) {
+                drawArc(
+                    color = frozenColor,
+                    startAngle = START_ANGLE,
+                    sweepAngle = frozen,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Butt),
+                )
+            }
+            // 主色弧（待还占用）：接在冻结段之后
             val sweep = pct?.let { (Methods.ringArc(it) / 100f) * 360f } ?: 0f
             if (sweep > 0f) {
                 drawArc(
                     color = PayColors.Primary,
-                    startAngle = START_ANGLE,
-                    sweepAngle = sweep.coerceAtMost(FULL_SWEEP),
+                    startAngle = START_ANGLE + frozen,
+                    sweepAngle = sweep.coerceAtMost((FULL_SWEEP - frozen).coerceAtLeast(0f)),
                     useCenter = false,
                     topLeft = topLeft,
                     size = arcSize,

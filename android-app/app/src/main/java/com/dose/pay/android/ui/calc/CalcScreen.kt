@@ -35,7 +35,6 @@ import com.dose.pay.android.core.Txns
 import com.dose.pay.android.ui.components.Avatar
 import com.dose.pay.android.ui.components.EmptyStateBox
 import com.dose.pay.android.ui.components.ErrorStateBox
-import com.dose.pay.android.ui.components.GapRing
 import com.dose.pay.android.ui.components.GradientAmountField
 import com.dose.pay.android.ui.components.HintText
 import com.dose.pay.android.ui.components.KeyValueRow
@@ -311,46 +310,6 @@ fun CalcScreen(
                             KeyValueRow("支付前已用", top.currentUsedText)
                             KeyValueRow("支付后已用", top.afterUsedText + " / " + top.limitShow)
                             KeyValueRow("支付后可用额度", top.remainingAfterText)
-
-                            // 迷你缺口环
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 6.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFFFFFFF).copy(alpha = 0.6f))
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            ) {
-                                GapRing(
-                                    pct = null,
-                                    arc = top.ringP,
-                                    color = top.ringColor,
-                                    none = top.ringNone,
-                                    diameter = 40.dp,
-                                    strokeWidth = 5.dp,
-                                ) {
-                                    Text(
-                                        top.ringPctText,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = if (top.ringNone) PayColors.Care else Color(0xFF3A3742),
-                                    )
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("支付后占用 ", fontSize = 13.sp, color = Color(0xFF6B6774))
-                                        Text(
-                                            if (top.ringNone) "未设额度" else top.ringPctText,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = if (top.ringNone) PayColors.Hint else PayColors.Text,
-                                        )
-                                    }
-                                    HintText("记一笔后「看板」环形将同步此值")
-                                }
-                            }
 
                             HintText(top.reason, modifier = Modifier.padding(top = 4.dp))
                         }

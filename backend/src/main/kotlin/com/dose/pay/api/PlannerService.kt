@@ -12,6 +12,7 @@ import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 /**
  * 业务异常：携带 HTTP 状态码与中文 detail，由全局异常处理器统一转换。
@@ -225,6 +226,121 @@ class PlannerService(
         )
     }
 
+    // -------------------- 看板：按账单周期聚合（只读） --------------------
+
+    /**
+     * 看板口径：**当前账单周期**的消费合计，不是自然月。
+     *
+     * 一条消费落在哪一期，由它的还款日决定（[Calculator.calculateDueDate]），
+     * 因此 (上一还款日, 本还款日] 正好覆盖本期的全部消费：
+     * - 上一还款日当天之后刷的 → 还款日落在本期，计入；
+     * - 还款日当天刷的 → 还款日已经滚到下一期，不计入本期。
+     *
+     * **只统计信用卡**：储蓄卡 / 电子钱包没有账单周期（还款日 = 刷卡当天），
+     * 混进来会让「本期」这个词失去意义，所以它们不进看板，也不进合计。
+     * 信用卡但缺还款规则的同样跳过（无法归期）。
+     *
+     * 各卡周期长短不一（28–31 天）且互不相同，所以总量是「各卡本期之和」，
+     * 不能理解成同一个日期区间内的合计。
+     */
+    fun cycleSummary(): CycleSummaryDTO {
+        val today = LocalDate.now()
+        val methods = methodRepo.findAllByActiveTrueOrderByIdAsc()
+            .map { it.toDomain() }
+            .filter { it.methodType == Calculator.CREDIT_CARD }
+        val txnsByCard: Map<Long, List<TransactionEntity>> =
+            if (methods.isEmpty()) emptyMap() else txnRepo.findAll().groupBy { it.paymentMethodId }
+
+        var totalSpend = BigDecimal.ZERO
+        var totalRepay = BigDecimal.ZERO
+        var settledSpend = BigDecimal.ZERO
+        val cards = ArrayList<CycleCardDTO>(methods.size)
+
+        for (method in methods) {
+            // 缺账单日 / 还款规则 → cycleWindow 返回 null，该卡无法归期，跳过
+            val window = Calculator.cycleWindow(today, method) ?: continue
+            val cycleEnd = window.second
+
+            var spend = BigDecimal.ZERO
+            var repay = BigDecimal.ZERO
+            var spendCount = 0
+            var repayCount = 0
+
+            for (txn in txnsByCard[method.id].orEmpty()) {
+                // 归期判据：这笔消费的还款日 == 本还款日
+                if (Calculator.cycleEndFor(txn.txnDate, method) != cycleEnd) continue
+                if (txn.type == Calculator.TXN_REPAY) {
+                    repay = repay.add(txn.amount)
+                    repayCount++
+                } else {
+                    spend = spend.add(txn.amount)
+                    spendCount++
+                }
+            }
+
+            totalSpend = totalSpend.add(spend)
+            totalRepay = totalRepay.add(repay)
+
+            // 「已还清」是人工标记（不是流水）：该卡本期消费不再计入额度占用，
+            // 仪表盘里这一段会被冻结成另一种颜色。
+            val settled = method.settledUntil != null && !method.settledUntil.isBefore(today)
+            if (settled) settledSpend = settledSpend.add(spend)
+
+            cards.add(
+                CycleCardDTO(
+                    paymentMethodId = method.id,
+                    paymentMethodName = method.name,
+                    methodType = method.methodType,
+                    basis = "cycle",
+                    cycleStart = window.first.toString(),
+                    cycleEnd = cycleEnd.toString(),
+                    daysToDue = ChronoUnit.DAYS.between(today, cycleEnd).toInt(),
+                    spendAmount = Calculator.formatAmount(spend) ?: "0.00",
+                    repayAmount = Calculator.formatAmount(repay) ?: "0.00",
+                    netAmount = Calculator.formatAmount(spend.subtract(repay)) ?: "0.00",
+                    spendCount = spendCount,
+                    repayCount = repayCount,
+                    currentUsed = Calculator.formatAmount(method.currentUsed) ?: "0.00",
+                    settled = settled,
+                )
+            )
+        }
+
+        return CycleSummaryDTO(
+            asOf = today.toString(),
+            totalSpend = Calculator.formatAmount(totalSpend) ?: "0.00",
+            totalRepay = Calculator.formatAmount(totalRepay) ?: "0.00",
+            totalNet = Calculator.formatAmount(totalSpend.subtract(totalRepay)) ?: "0.00",
+            settledSpend = Calculator.formatAmount(settledSpend) ?: "0.00",
+            cards = cards,
+        )
+    }
+
+    /**
+     * 标记 / 取消「已还清」。
+     *
+     * 这是**人工标记**，不写任何流水，也不改 `current_used`：
+     * 只是告诉看板「这张卡本期这笔钱我已经还了」，于是
+     * - 看板这一行显示「已还清」而不是金额；
+     * - 仪表盘里它占的那一段被冻结成另一种颜色，不再计入额度占用。
+     *
+     * 标记有效期 = 当前账单周期的还款日：过了这天进入下一期，标记自动失效。
+     */
+    @Transactional
+    fun setSettled(methodId: Long, settled: Boolean): MethodDTO {
+        val entity = methodRepo.findById(methodId).orElse(null)
+            ?: throw ApiException.notFound("支付方式 $methodId 不存在")
+
+        if (settled) {
+            val window = Calculator.cycleWindow(LocalDate.now(), entity.toDomain())
+                ?: throw ApiException.badRequest("「${entity.name}」没有账单周期（只有信用卡能标记已还清）")
+            entity.settledUntil = window.second
+        } else {
+            entity.settledUntil = null
+        }
+        return methodRepo.save(entity).toDto()
+    }
+
     // -------------------- 消费流水（余额同事务原子维护） --------------------
 
     /**
@@ -332,7 +448,19 @@ class PlannerService(
             dueDaysAfterStatement = dueDaysAfterStatement,
             statementDayInclusive = statementDayInclusive,
             active = active,
+            settled = isSettledNow(),
         )
+    }
+
+    /**
+     * 「已还清」标记是否当前生效。
+     *
+     * 标记带有效期（= 标记时所在账单周期的还款日），过了就自动失效，
+     * 下一期恢复正常占用，不需要人工清理。
+     */
+    private fun PaymentMethodEntity.isSettledNow(): Boolean {
+        val until = settledUntil ?: return false
+        return !until.isBefore(LocalDate.now())
     }
 
     private fun TransactionEntity.toDto(methodName: String): TxnDTO = TxnDTO(
