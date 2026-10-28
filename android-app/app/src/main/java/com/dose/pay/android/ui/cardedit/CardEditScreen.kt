@@ -211,22 +211,6 @@ fun CardEditScreen(
             ErrorText(state.errors["credit_limit"])
         }
 
-        /* 余额说明 */
-        PayCard(contentPadding = 12.dp) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                Text("🚫", fontSize = 16.sp)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "本页已移除「当前已用金额」字段",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PayColors.Text,
-                    )
-                    HintText("余额只在「看板」经记一笔 / 直接更新维护 · 提交时自动回传原值，不会被清零")
-                }
-            }
-        }
-
         /* ② 账单与还款规则（仅信用卡） */
         if (state.isCredit) {
             PayCard(contentPadding = 12.dp) {
@@ -297,17 +281,6 @@ fun CardEditScreen(
             enabled = !state.saving,
             modifier = Modifier.padding(top = 6.dp),
         ) { vm.save(onDone) }
-
-        Text(
-            "取消",
-            fontSize = 13.sp,
-            color = PayColors.TextMuted,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onDone() }
-                .padding(vertical = 4.dp),
-        )
-        HintText("名称需唯一 · 类型非信用卡时规则组隐藏 · 校验失败行内报错")
     }
 
     /* 数字选择弹窗 */
