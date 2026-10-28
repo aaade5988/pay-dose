@@ -1,11 +1,11 @@
 import java.util.Properties
 
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.devtools.ksp")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 // ── Release 签名：密码只从环境变量 / keystore.properties 读取，不写进版本控制 ──
@@ -23,12 +23,12 @@ val signingKeyAlias: String = keystoreProps.getProperty("keyAlias") ?: "pay-dose
 val hasReleaseSigning = keystoreFile.exists() && signingStorePass != null
 
 android {
-    namespace = "com.dose.pay.android"
+    namespace = "com.dosepay.app"
     compileSdk = 36
     buildToolsVersion = "36.1.0"
 
     defaultConfig {
-        applicationId = "com.dose.pay.android"
+        applicationId = "com.dosepay.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -59,7 +59,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 未启用混淆时不需要 proguard 规则文件；开启 minify 后再补上
             // 有 keystore + 密码就用正式签名，否则回退 debug 签名（便于无密钥环境构建）
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
@@ -80,6 +80,8 @@ android {
 
     buildFeatures {
         compose = true
+        // 让 BuildConfig.VERSION_NAME 可用（更新检查需要读取当前版本号）
+        buildConfig = true
     }
 
     packaging {
@@ -90,31 +92,35 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
+    val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
 
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
-    implementation("androidx.navigation:navigation-compose:2.8.2")
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.navigation.compose)
 
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
 
     // ── 本地数据库（取代原 Spring Boot 后端）──
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    // 更新检查（访问 GitHub Releases API）
+    implementation(libs.okhttp)
+
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
     // 本地化后仍需测试依赖跑算法单测
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }

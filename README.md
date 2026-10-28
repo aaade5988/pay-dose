@@ -29,7 +29,7 @@
 ### 计算
 
 1. 输入这次要刷的金额
-2. 选择支付日期（可选今天 / 明天 / 本周末 / 下账单日前）
+2. 选择支付日期（默认今天，点日期行可改）
 3. 点「生成前三名推荐」
 
 结果按占用天数排序，第一名是能让钱在手里待最久的那张卡。
@@ -71,6 +71,10 @@
 
 各卡还款日不同，周期长短也不一样，所以顶部的合计是「各卡本期之和」，不是某个统一日期区间的总额。
 
+每张卡行末的金额是**本期待还 = 本期消费 − 本期还款**，不是本期消费总额。记一笔还款后这个数字和顶部占用率会立刻下降，同时环上的绿色「已还」段会变长。
+
+环上两段：绿色 = 已还（人工标记「已还清」的卡 + 本期实际还款流水），紫色 = 待还占用。左滑卡片的「已还清」是人工标记，不写流水、不动余额，只改变它算在绿色还是紫色里。
+
 ## 常见问题
 
 **换了手机数据怎么办？**
@@ -110,7 +114,7 @@ $env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
 
 ```powershell
 adb install -r app\build\outputs\apk\release\app-release.apk
-adb shell am start -n com.dose.pay.android/.MainActivity
+adb shell am start -n com.dosepay.app/.MainActivity
 ```
 
 ### 测试
@@ -127,20 +131,37 @@ cd android-app
 ```
 pay-dose/
 ├── android-app/                  主工程
+│   ├── gradle/libs.versions.toml 依赖与插件版本集中管理
 │   ├── keystore/                 release 签名（不入 git，自行备份）
-│   └── app/src/main/
-│       ├── assets/seed-data.json 首启导入的初始数据
-│       ├── java/com/dose/pay/android/
+│   └── app/src/
+│       ├── main/assets/seed-data.json   首启导入的初始数据
+│       ├── main/java/com/dosepay/app/
+│       │   ├── MainActivity.kt / PayDoseApp.kt   入口
 │       │   ├── core/             算法核心（纯 Kotlin，无框架依赖）
+│       │   │   ├── Calculator.kt   还款日推算与推荐排序
+│       │   │   ├── Formatters.kt   Money 金额 + Dates 日期工具
+│       │   │   ├── Bills.kt / Cycles.kt / Txns.kt / Methods.kt   展示模型与聚合
 │       │   ├── data/             Repository + Room 数据层
+│       │   │   ├── Dto.kt / PlannerRepository.kt / UiEventBus.kt
+│       │   │   └── local/          Room 实体、DAO、数据库、种子导入、本地服务
 │       │   └── ui/               Compose 界面
+│       │       ├── PayDoseRoot.kt        底部导航与页面宿主
+│       │       ├── nav/                   路由表
+│       │       ├── theme/                 配色、排版、圆角令牌
+│       │       ├── components/            通用组件（卡片/徽标/按钮/状态/环图/日期选择）
+│       │       ├── calc/ cards/ dashboard/ bills/ cardedit/ txnsheet/   各功能页
+│       │       │   └── （XxxScreen.kt 页面 + XxxViewModel.kt 状态；拆出的子组件在 XxxComponents.kt）
 │       └── test/                 单元测试
 ├── backend/                      旧版 Spring Boot 后端（仅存档，不参与构建）
 ├── data/                         本地数据与导出备份（不入 git）
-└── docs/                         规格书与迁移指南
+└── docs/                         规格书、迁移指南、清理审计记录
 ```
 
 `backend/` 是历史上的服务端实现，现在**不再使用也不参与发布**，只作为数据迁移工具和行为参考保留。
+
+### 包名
+
+`applicationId` 与 `namespace` 均为 `com.dosepay.app`。
 
 ### 签名
 

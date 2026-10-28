@@ -15,9 +15,7 @@ package com.dose.pay.tools
 
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.nio.file.Path
 import java.sql.Connection
-import java.sql.DriverManager
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
