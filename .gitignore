@@ -48,6 +48,10 @@ keystore.properties
 *.db.bak
 data/backup/
 
+# ── 分发产物（APK / Release 说明，不入库）──
+dist/
+*.apk
+
 # ── 日志与临时 ──
 *.log
 logs/
