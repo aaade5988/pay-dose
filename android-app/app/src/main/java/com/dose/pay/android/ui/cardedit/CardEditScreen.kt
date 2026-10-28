@@ -10,11 +10,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -68,20 +72,32 @@ fun CardEditScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         /* 顶部标题栏 */
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "‹",
-                fontSize = 22.sp,
-                color = PayColors.Primary,
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 返回：用图标 + 圆形浅底 + 34dp 触控区，替代纯文本「‹」
+            Box(
                 modifier = Modifier
-                    .padding(end = 6.dp)
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(PayColors.Primary.copy(alpha = 0.10f))
                     .clickable { onDone() },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    tint = PayColors.Primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
             Text(
                 if (state.isEdit) "编辑支付方式" else "新增支付方式",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
                 color = PayColors.Text,
+                modifier = Modifier.padding(start = 8.dp),
             )
         }
 
@@ -114,7 +130,7 @@ fun CardEditScreen(
 
         /* ① 基础信息 */
         PayCard(contentPadding = 12.dp) {
-            GroupTitle("基础信息", if (state.isEdit) "编辑 #" + state.methodId else "新增")
+            GroupTitle("基础信息")
 
             EditRow(label = "名称") {
                 BasicTextField(
@@ -214,7 +230,7 @@ fun CardEditScreen(
         /* ② 账单与还款规则（仅信用卡） */
         if (state.isCredit) {
             PayCard(contentPadding = 12.dp) {
-                GroupTitle("账单与还款规则", null)
+                GroupTitle("账单与还款规则")
 
                 PickerRow(
                     label = "账单日",
@@ -361,24 +377,8 @@ private enum class PickerTarget { STATEMENT_DAY, DUE_DAY, AFTER_DAYS }
 
 /** 分组标题 */
 @Composable
-private fun GroupTitle(title: String, tag: String?) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = PayColors.Text)
-        if (tag != null) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(PayColors.Secondary)
-                    .padding(horizontal = 7.dp, vertical = 2.dp),
-            ) {
-                Text(tag, fontSize = 11.sp, color = PayColors.Primary)
-            }
-        }
-    }
+private fun GroupTitle(title: String) {
+    Text(title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = PayColors.Text)
 }
 
 /** 表单行：左标签 + 右输入 */
