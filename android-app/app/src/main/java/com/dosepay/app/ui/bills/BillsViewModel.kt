@@ -182,12 +182,11 @@ class BillsViewModel(
         }
     }
 
-    /** 删除流水（后端同事务回滚余额） */
+    /** 删除流水（同事务回滚余额）：列表行会立刻消失，不再额外弹 toast */
     fun delete(id: Long) {
         viewModelScope.launch {
             try {
                 repository.deleteTransaction(id)
-                events.show("已删除，余额已回滚")
                 load()
             } catch (e: ApiError) {
                 events.show(e.message)
