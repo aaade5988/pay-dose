@@ -46,32 +46,42 @@ class CardsViewModel(
     private val _state = MutableStateFlow(CardsUiState())
     val state: StateFlow<CardsUiState> = _state.asStateFlow()
 
-    fun load() {
-        _state.update { it.copy(loading = it.rows.isEmpty(), refreshing = true, errorMessage = "") }
-        viewModelScope.launch {
-            try {
-                val list = repository.listMethods()
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        refreshing = false,
-                        errorMessage = "",
-                        rows = list.map { m ->
-                            CardRow(
-                                id = m.id,
-                                name = m.name,
-                                methodType = m.methodType,
-                                initial = Methods.nameInitial(m.name),
-                                color = Methods.avatarColor(m.name),
-                                chipStyle = Methods.typeChipStyle(m.methodType),
-                                ruleText = Methods.ruleLine(m),
-                            )
-                        },
-                    )
-                }
-            } catch (e: ApiError) {
-                _state.update { it.copy(loading = false, refreshing = false, errorMessage = e.message, rows = emptyList()) }
+    /** 是否已经拿到过一次结果（成功或失败都算）：之后再刷新就别再闪加载态了 */
+    private var hasLoaded = false
+
+    /**
+     * 取卡片列表。
+     *
+     * 是 suspend 的：下拉刷新容器要能等到这里真正结束再收指示器，
+     * 否则空列表（查询毫秒级返回）会被指示器的兜底超时卡住好几秒。
+     */
+    suspend fun load() {
+        val first = !hasLoaded
+        _state.update { it.copy(loading = first, refreshing = !first, errorMessage = "") }
+        try {
+            val list = repository.listMethods()
+            _state.update {
+                it.copy(
+                    loading = false,
+                    refreshing = false,
+                    errorMessage = "",
+                    rows = list.map { m ->
+                        CardRow(
+                            id = m.id,
+                            name = m.name,
+                            methodType = m.methodType,
+                            initial = Methods.nameInitial(m.name),
+                            color = Methods.avatarColor(m.name),
+                            chipStyle = Methods.typeChipStyle(m.methodType),
+                            ruleText = Methods.ruleLine(m),
+                        )
+                    },
+                )
             }
+        } catch (e: ApiError) {
+            _state.update { it.copy(loading = false, refreshing = false, errorMessage = e.message, rows = emptyList()) }
+        } finally {
+            hasLoaded = true
         }
     }
 

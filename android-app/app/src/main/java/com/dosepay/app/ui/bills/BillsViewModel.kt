@@ -69,9 +69,12 @@ class BillsViewModel(
     /** 全量流水缓存（已按 txn_date DESC, id DESC） */
     private var allTxns: List<TxnDto> = emptyList()
 
-    /** 首次进入 / 下拉刷新：重建全量缓存 */
-    fun load() {
-        val first = allTxns.isEmpty()
+    /** 是否已经拿到过一次结果（成功或失败都算）：之后刷新就别再闪加载态 */
+    private var hasLoaded = false
+
+    /** 首次进入 / 下拉刷新：重建全量缓存。suspend：下拉刷新容器要等它真正结束 */
+    suspend fun load() {
+        val first = !hasLoaded
         _state.update {
             it.copy(
                 loading = first,
@@ -80,56 +83,56 @@ class BillsViewModel(
                 errorMessage = "",
             )
         }
-        viewModelScope.launch {
-            try {
-                val methods = repository.listMethods()
-                val fetched = ArrayList<TxnDto>(PAGE_LIMIT * 2)
-                var offset = 0
-                var page = 0
-                while (page < MAX_PAGES) {
-                    val chunk = repository.listTransactions(null, PAGE_LIMIT, offset)
-                    fetched.addAll(chunk)
-                    if (chunk.size < PAGE_LIMIT) break
-                    offset += chunk.size
-                    page++
-                }
-                allTxns = fetched
+        try {
+            val methods = repository.listMethods()
+            val fetched = ArrayList<TxnDto>(PAGE_LIMIT * 2)
+            var offset = 0
+            var page = 0
+            while (page < MAX_PAGES) {
+                val chunk = repository.listTransactions(null, PAGE_LIMIT, offset)
+                fetched.addAll(chunk)
+                if (chunk.size < PAGE_LIMIT) break
+                offset += chunk.size
+                page++
+            }
+            allTxns = fetched
+            _state.update {
+                it.copy(
+                    loading = false,
+                    refreshing = false,
+                    errorMessage = "",
+                    filters = methods.map { m ->
+                        BillFilter(
+                            idStr = m.id.toString(),
+                            short = Txns.shortName(m.name),
+                            initial = Methods.nameInitial(m.name),
+                            color = Methods.avatarColor(m.name),
+                        )
+                    },
+                    loadedCount = fetched.size,
+                    hasMore = page >= MAX_PAGES,
+                )
+            }
+            rebuild()
+        } catch (e: ApiError) {
+            // 首屏失败才清空；下拉刷新失败保留旧数据，只提示
+            if (allTxns.isEmpty()) {
                 _state.update {
                     it.copy(
                         loading = false,
                         refreshing = false,
-                        errorMessage = "",
-                        filters = methods.map { m ->
-                            BillFilter(
-                                idStr = m.id.toString(),
-                                short = Txns.shortName(m.name),
-                                initial = Methods.nameInitial(m.name),
-                                color = Methods.avatarColor(m.name),
-                            )
-                        },
-                        loadedCount = fetched.size,
-                        hasMore = page >= MAX_PAGES,
+                        errorMessage = e.message,
+                        months = emptyList(),
+                        filters = emptyList(),
+                        overview = Bills.overview(emptyList()),
                     )
                 }
-                rebuild()
-            } catch (e: ApiError) {
-                // 首屏失败才清空；下拉刷新失败保留旧数据，只提示
-                if (allTxns.isEmpty()) {
-                    _state.update {
-                        it.copy(
-                            loading = false,
-                            refreshing = false,
-                            errorMessage = e.message,
-                            months = emptyList(),
-                            filters = emptyList(),
-                            overview = Bills.overview(emptyList()),
-                        )
-                    }
-                } else {
-                    _state.update { it.copy(loading = false, refreshing = false) }
-                    events.show(e.message)
-                }
+            } else {
+                _state.update { it.copy(loading = false, refreshing = false) }
+                events.show(e.message)
             }
+        } finally {
+            hasLoaded = true
         }
     }
 

@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import com.dosepay.app.ui.components.ErrorStateBox
 import com.dosepay.app.ui.components.HintText
 import com.dosepay.app.ui.components.PayPullToRefresh
 import com.dosepay.app.ui.theme.PayColors
+import kotlinx.coroutines.launch
 
 /**
  * 账单页（Tab4，原「我的」位）。
@@ -50,11 +52,11 @@ import com.dosepay.app.ui.theme.PayColors
 fun BillsScreen(vm: BillsViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<BillRow?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { vm.load() }
 
     PayPullToRefresh(
-        isRefreshing = state.refreshing,
         onRefresh = { vm.load() },
     ) {
         Column(
@@ -124,7 +126,7 @@ fun BillsScreen(vm: BillsViewModel) {
                         color = PayColors.Primary,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { vm.load() }
+                            .clickable { scope.launch { vm.load() } }
                             .padding(vertical = 6.dp),
                     )
                 }

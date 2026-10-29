@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -24,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +49,7 @@ import com.dosepay.app.ui.components.SectionDivider
 import com.dosepay.app.ui.components.SwipeRevealRow
 import com.dosepay.app.ui.theme.PayColors
 import com.dosepay.app.ui.theme.Radii
+import kotlinx.coroutines.launch
 
 /**
  * 额度看板页（Tab3）：本期聚合仪表盘 + 本账单周期逐卡 + 「余额详情」半屏。
@@ -64,11 +67,11 @@ fun DashboardScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     /** 左滑「已还清」待确认的周期卡 */
     var settleTarget by remember { mutableStateOf<CycleRow?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { vm.load() }
 
     PayPullToRefresh(
-        isRefreshing = state.refreshing,
         onRefresh = { vm.load() },
     ) {
     Column(
@@ -96,7 +99,7 @@ fun DashboardScreen(
                     color = PayColors.Primary,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { vm.load() }
+                        .clickable { scope.launch { vm.load() } }
                         .padding(vertical = 6.dp),
                 )
             }
@@ -115,6 +118,9 @@ fun DashboardScreen(
                 val gaugeReady = state.cycleError.isEmpty()
 
                 /* ① 聚合仪表盘：本期消费合计 ÷ Σ已设额度（与下方逐卡本期消费同源） */
+                /* 点下方周期卡可聚焦到单卡：顶部环换成那张卡自己的口径 */
+                val focusRow = state.focusedId?.let { id -> state.cycle.rows.firstOrNull { it.id == id } }
+                val shown = state.focusedGauge ?: state.gauge
                 PayCard(contentPadding = 12.dp) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -122,45 +128,53 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            "本期额度占用 · 断开式仪表盘",
+                            if (focusRow != null) "本期额度占用 · " + focusRow.name else "本期额度占用",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF6B6774),
                         )
-                        PayChip(
-                            text = gauge.limitedCount.toString() + "/" + gauge.count + " 设额度",
-                            style = ChipStyle.GRAY,
-                        )
+                        if (focusRow != null) {
+                            PayChip(
+                                text = "✕ 返回全部",
+                                style = ChipStyle.GRAY,
+                                onClick = { vm.toggleFocus(focusRow.id) },
+                            )
+                        } else {
+                            PayChip(
+                                text = gauge.limitedCount.toString() + "/" + gauge.count + " 设额度",
+                                style = ChipStyle.GRAY,
+                            )
+                        }
                     }
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         RingGauge(
-                            pct = if (gaugeReady) gauge.pct else null,
+                            pct = if (gaugeReady) shown.pct else null,
                             diameter = 148.dp,
                             strokeWidth = 14.dp,
-                            frozenP = if (gaugeReady) gauge.frozenP else 0f,
+                            frozenP = if (gaugeReady) shown.frozenP else 0f,
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    if (gaugeReady) gauge.pctText else "—",
+                                    if (gaugeReady) shown.pctText else "—",
                                     fontSize = 32.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = PayColors.Text,
                                 )
                                 Text("本期待还占用率", fontSize = 11.sp, color = PayColors.Hint)
-                                if (gaugeReady && gauge.hasLimited) {
+                                if (gaugeReady && shown.hasLimited) {
                                     Text(
-                                        gauge.usedText + " / " + gauge.limitText,
+                                        shown.usedText + " / " + shown.limitText,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = PayColors.Primary,
                                     )
                                 }
-                                if (gaugeReady && gauge.hasSettled) {
+                                if (gaugeReady && shown.hasSettled) {
                                     Text(
-                                        "已还 " + gauge.settledText,
+                                        "已还 " + shown.settledText,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = PayColors.RepayGreen,
@@ -169,7 +183,7 @@ fun DashboardScreen(
                             }
                         }
                     }
-                    if (gaugeReady && gauge.hasSettled) {
+                    if (gaugeReady && shown.hasSettled) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -191,11 +205,12 @@ fun DashboardScreen(
                 /* ② 本账单周期（上一还款日 → 本还款日） */
                 SectionDivider(
                     title = "本账单周期",
-                    sub = "按还款日归期，不是自然月",
+                    sub = "按还款日归期 · 点卡片可单独查看",
                     modifier = Modifier.padding(top = 6.dp),
                 )
 
                 state.cycle.rows.forEach { cyc ->
+                    val focused = state.focusedId == cyc.id
                     /* 左滑 → 标记 / 取消「已还清」（人工标记，不写流水） */
                     SwipeRevealRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -203,8 +218,13 @@ fun DashboardScreen(
                         actionLabel = if (cyc.settled) "取消标记" else "已还清",
                         actionColor = if (cyc.settled) PayColors.ChipGrayText else PayColors.RepayGreen,
                         onAction = { settleTarget = cyc },
+                        /* 点卡片 → 上方环切到这张卡；再点同一张取消，回到全部 */
+                        onContentClick = { vm.toggleFocus(cyc.id) },
                     ) {
-                        PayCard(contentPadding = 0.dp) {
+                        PayCard(
+                            contentPadding = 0.dp,
+                            background = if (focused) PayColors.Secondary else PayColors.Surface,
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -228,6 +248,14 @@ fun DashboardScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                                     ) {
+                                        if (focused) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PayColors.Primary),
+                                            )
+                                        }
                                         Text(
                                             cyc.name,
                                             fontSize = 14.sp,
@@ -277,14 +305,13 @@ fun DashboardScreen(
     }
 
     /* 左滑「已还清」确认弹窗 */
-    /* 左滑「已还清」确认弹窗 */
     val settle = settleTarget
     if (settle != null) {
         AlertDialog(
             onDismissRequest = { settleTarget = null },
             title = {
                 Text(
-                    if (settle.settled) "取消已还清 · " + settle.name else "标记已还清 · " + settle.name,
+                    if (settle.settled) "取消已还清标记？" else "标记为已还清？",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -292,12 +319,9 @@ fun DashboardScreen(
             text = {
                 Text(
                     if (settle.settled) {
-                        "取消后「" + settle.name + "」本期消费（" + settle.spendText +
-                            "）重新计入额度占用，仪表盘恢复正常颜色。"
+                        "恢复显示，本期消费重新计入额度占用。"
                     } else {
-                        "标记后「" + settle.name + "」本期这一行显示「已还清」而不是金额，" +
-                            "仪表盘里它占的那一段（" + settle.spendText + "）会冻结成绿色、不再计入额度占用。" +
-                            "\n\n这只是人工标记：不写还款流水、不动已用余额；标记在本期还款日后自动失效。"
+                        "仅改显示，不产生还款记录，还款日后自动恢复。"
                     },
                     fontSize = 14.sp,
                     color = PayColors.TextMuted,
@@ -309,7 +333,7 @@ fun DashboardScreen(
                     vm.setSettled(settle.id, !settle.settled)
                 }) {
                     Text(
-                        if (settle.settled) "取消标记" else "确认标记",
+                        "确认",
                         color = if (settle.settled) PayColors.Text else PayColors.RepayGreen,
                         fontWeight = FontWeight.Bold,
                     )

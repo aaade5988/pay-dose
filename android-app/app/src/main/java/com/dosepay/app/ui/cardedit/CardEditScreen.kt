@@ -130,6 +130,7 @@ fun CardEditScreen(
                     value = state.form.name,
                     onValueChange = { vm.setName(it) },
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     textStyle = TextStyle(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -137,13 +138,14 @@ fun CardEditScreen(
                         textAlign = TextAlign.End,
                     ),
                     decorationBox = { inner ->
-                        Box {
+                        // inner 自身是 fillMaxWidth 的，placeholder 必须用同一套对齐才能跟输入文字严格同一条右边界
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                             if (state.form.name.isEmpty()) {
                                 Text(
-                                    "例如：平安信用卡",
-                                    fontSize = 13.sp,
+                                    "未命名",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = PayColors.Care,
-                                    textAlign = TextAlign.End,
                                 )
                             }
                             inner()
@@ -163,12 +165,12 @@ fun CardEditScreen(
             }
 
             EditRow(label = "信用额度") {
-                Text("¥", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PayColors.TextMuted)
                 BasicTextField(
                     value = state.form.creditLimit,
                     onValueChange = { vm.setCreditLimit(it) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
                     textStyle = TextStyle(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -176,16 +178,32 @@ fun CardEditScreen(
                         textAlign = TextAlign.End,
                     ),
                     decorationBox = { inner ->
-                        Box {
-                            if (state.form.creditLimit.isEmpty()) {
-                                Text(
-                                    "留空 = 不限额",
-                                    fontSize = 13.sp,
-                                    color = PayColors.Care,
-                                    textAlign = TextAlign.End,
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // weight 区把右侧留给单位，inner 填满该区后数字右对齐，正好贴着「元」
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 3.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                if (state.form.creditLimit.isEmpty()) {
+                                    Text(
+                                        "0",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PayColors.Care,
+                                    )
+                                }
+                                inner()
                             }
-                            inner()
+                            Text(
+                                " 元",
+                                fontSize = 12.sp,
+                                color = PayColors.TextMuted,
+                            )
                         }
                     },
                 )

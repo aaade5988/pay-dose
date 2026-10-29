@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ import com.dosepay.app.ui.components.PayPullToRefresh
 import com.dosepay.app.ui.components.PrimaryButton
 import com.dosepay.app.ui.components.SwipeRevealRow
 import com.dosepay.app.ui.theme.PayColors
+import kotlinx.coroutines.launch
 
 /**
  * 卡片列表页（Tab2）：只展示规则，不展示余额。
@@ -54,11 +56,11 @@ fun CardsScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<CardRow?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { vm.load() }
 
     PayPullToRefresh(
-        isRefreshing = state.refreshing,
         onRefresh = { vm.load() },
     ) {
     Column(
@@ -106,7 +108,7 @@ fun CardsScreen(
                     color = PayColors.Primary,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { vm.load() }
+                        .clickable { scope.launch { vm.load() } }
                         .padding(vertical = 6.dp),
                 )
             }

@@ -22,6 +22,8 @@ data class CycleRow(
     val spendCount: Int,
     val repayText: String,
     val repayCount: Int,
+    /** 本期还款流水合计（分）：单卡仪表盘绿色段（已还）的来源 */
+    val repayCents: Long = 0L,
     /** 本期待还 = 本期消费 − 本期还款（负数按 0 处理），列表右侧展示的就是它 */
     val netText: String,
     val netCents: Long,
@@ -101,6 +103,7 @@ object Cycles {
             spendCount = spendCount,
             repayText = Money.moneyCompact(card.repayAmount),
             repayCount = card.repayCount,
+            repayCents = Money.toCents(card.repayAmount) ?: 0L,
             netText = Money.moneyCompact(Money.fromCents(netCents)),
             netCents = netCents,
             dueText = dueText(card.daysToDue),

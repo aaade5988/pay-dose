@@ -30,6 +30,10 @@ data class DashboardUiState(
     val cycle: CycleAgg = Cycles.aggregate(CycleSummaryDto()),
     /** 周期接口单独失败时的提示；额度数据仍可正常展示 */
     val cycleError: String = "",
+    /** 聚焦的单卡（点下方周期卡 → 上方环切到这张卡）；null = 看全部 */
+    val focusedId: Long? = null,
+    /** 聚焦卡的环数据；null = 用聚合环 */
+    val focusedGauge: AggUsage? = null,
 )
 
 /**
@@ -55,49 +59,85 @@ class DashboardViewModel(
     /** 「已还清」请求进行中（防重复点击） */
     private var settling = false
 
-    fun load() {
-        _state.update { it.copy(loading = it.rows.isEmpty(), refreshing = true, errorMessage = "") }
-        viewModelScope.launch {
-            try {
-                val list = repository.listMethods()
-                rawMethods = list
-                _state.update { st ->
-                    st.copy(
-                        loading = false,
-                        refreshing = false,
-                        errorMessage = "",
-                        rows = list.map(Methods::toDashRow),
-                        gauge = Methods.cycleGauge(
-                            list,
-                            st.cycle.totalNetCents,
-                            st.cycle.settledNetCents,
-                            st.cycle.totalRepayCents,
-                        ),
-                    )
-                }
-            } catch (e: ApiError) {
-                _state.update { it.copy(loading = false, refreshing = false, errorMessage = e.message) }
-                return@launch
+    /** 是否已经拿到过一次结果（成功或失败都算）：之后刷新就别再闪加载态 */
+    private var hasLoaded = false
+
+    /** 取看板数据。suspend：下拉刷新容器要等它真正结束再收指示器 */
+    suspend fun load() {
+        val first = !hasLoaded
+        _state.update { it.copy(loading = first, refreshing = !first, errorMessage = "") }
+        try {
+            val list = repository.listMethods()
+            rawMethods = list
+            _state.update { st ->
+                st.copy(
+                    loading = false,
+                    refreshing = false,
+                    errorMessage = "",
+                    rows = list.map(Methods::toDashRow),
+                    gauge = Methods.cycleGauge(
+                        list,
+                        st.cycle.totalNetCents,
+                        st.cycle.settledNetCents,
+                        st.cycle.totalRepayCents,
+                    ),
+                )
             }
-            // 周期数据独立加载：失败只降级提示，不影响卡片数据
-            try {
-                val cycle = Cycles.aggregate(repository.cycleSummary())
-                _state.update {
-                    it.copy(
-                        cycle = cycle,
-                        gauge = Methods.cycleGauge(
-                            rawMethods,
-                            cycle.totalNetCents,
-                            cycle.settledNetCents,
-                            cycle.totalRepayCents,
-                        ),
-                        cycleError = "",
-                    )
-                }
-            } catch (e: ApiError) {
-                _state.update { it.copy(cycleError = e.message) }
-            }
+        } catch (e: ApiError) {
+            _state.update { it.copy(loading = false, refreshing = false, errorMessage = e.message) }
+            return
+        } finally {
+            hasLoaded = true
         }
+        // 周期数据独立加载：失败只降级提示，不影响卡片数据
+        try {
+            val cycle = Cycles.aggregate(repository.cycleSummary())
+            _state.update {
+                it.copy(
+                    cycle = cycle,
+                    gauge = Methods.cycleGauge(
+                        rawMethods,
+                        cycle.totalNetCents,
+                        cycle.settledNetCents,
+                        cycle.totalRepayCents,
+                    ),
+                    focusedGauge = focusGauge(it.focusedId, cycle),
+                    cycleError = "",
+                )
+            }
+        } catch (e: ApiError) {
+            _state.update { it.copy(cycleError = e.message) }
+        }
+    }
+
+    /**
+     * 点下方周期卡 → 上方环切到这张卡单独的数据；再点同一张取消，回到全部。
+     *
+     * 纯本地切换，不重新请求接口；刷新后仍保持聚焦。
+     */
+    fun toggleFocus(id: Long) {
+        _state.update { st ->
+            val next = if (st.focusedId == id) null else id
+            st.copy(focusedId = next, focusedGauge = focusGauge(next, st.cycle))
+        }
+    }
+
+    /**
+     * 单卡环：分母 = 该卡自己的额度，分子 = 该卡本期待还。
+     *
+     * 口径和聚合环完全一致（[Methods.cycleGauge]），只是把范围收窄到一张卡，
+     * 所以「点开某张卡看到的百分比」和「全部卡的百分比」是同一把尺子。
+     */
+    private fun focusGauge(id: Long?, cycle: CycleAgg): AggUsage? {
+        if (id == null) return null
+        val row = cycle.rows.firstOrNull { it.id == id } ?: return null
+        val method = rawOf(id) ?: return null
+        return Methods.cycleGauge(
+            methods = listOf(method),
+            netCents = row.netCents,
+            settledCents = if (row.settled) row.netCents else 0L,
+            repaidCents = row.repayCents,
+        )
     }
 
     private fun rawOf(id: Long): MethodDto? = rawMethods.firstOrNull { it.id == id }

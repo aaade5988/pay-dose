@@ -190,7 +190,7 @@ class CalcViewModel(
                     _state.update {
                         it.copy(
                             status = ResultStatus.ERROR,
-                            errorMessage = "没有可用的支付方式：所有方式的「已用 + 本次」都超出额度，请调低金额或到「卡片」页提升额度。",
+                            errorMessage = "没有可用的支付方式：所有方式的「已用 + 本次」都超出额度。",
                             results = emptyList(),
                             resultCountText = "",
                         )
