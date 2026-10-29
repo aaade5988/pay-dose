@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,10 @@ fun CalcScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     var showDatePicker by remember { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
+
+    // 每次进入计算页刷新卡片列表：ViewModel 会随返回栈保活，
+    // 只在 init 里加载的话，去「卡片」页新增后再切回来，选卡弹层拿到的还是旧快照。
+    LaunchedEffect(Unit) { vm.loadMethods() }
 
     Column(
         modifier = Modifier
