@@ -173,7 +173,10 @@ Release 签名文件在 `android-app/keystore/`，密码从环境变量或 `keys
 
 1. 修改 `app/build.gradle.kts` 里的 `versionCode`（必须递增）和 `versionName`
 2. `.\gradlew.bat assembleRelease`
-3. 把 `app-release.apk` 传到 GitHub Releases
+3. 在 Gitee 上打 tag（如 `v1.0.1`，与 `versionName` 对齐）并创建 Release
+4. 把 APK 作为 Release 附件上传，文件名以 `.apk` 结尾
+
+> 更新检查走 Gitee OpenAPI（`/repos/{owner}/{repo}/releases/latest`），**仓库必须公开**，否则 App 匿名请求只会拿到 404。Release 没挂 APK 附件时，「去下载」会打开 Release 网页。
 
 ## 免责声明
 
