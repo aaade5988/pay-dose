@@ -1,6 +1,7 @@
 package com.dosepay.app.ui.components
 
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -71,7 +72,9 @@ fun PayPullToRefresh(
             startedAt = System.currentTimeMillis()
             onRefresh()
         },
-        modifier = modifier,
+        // 必须撑满可用高度：默认 wrap 的话，内容不满一屏时下拉手势
+        // 只有落在内容那一小块区域才生效，看起来就像「下拉刷新没了」
+        modifier = Modifier.fillMaxSize().then(modifier),
         state = state,
     ) {
         content()
