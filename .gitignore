@@ -24,7 +24,8 @@ captures/
 .project
 
 # ── 运行时数据（SQLite 文件不入库）──
-data/
+# 锚定到仓库根：不锚定会连 Android 的 com/dosepay/app/data 包一起吃掉
+/data/
 *.db
 *.db-journal
 *.db-wal
