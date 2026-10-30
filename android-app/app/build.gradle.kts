@@ -52,6 +52,8 @@ android {
                 storePassword = signingStorePass
                 keyAlias = signingKeyAlias
                 keyPassword = signingKeyPass ?: signingStorePass
+                // v3 让未来「密钥轮换」成为可能：换签名后仍能覆盖升级老用户
+                enableV3Signing = true
             }
         }
     }
@@ -60,7 +62,8 @@ android {
         release {
             isMinifyEnabled = false
             // 未启用混淆时不需要 proguard 规则文件；开启 minify 后再补上
-            // 有 keystore + 密码就用正式签名，否则回退 debug 签名（便于无密钥环境构建）
+            // 这里的 debug 分支仅用于无密钥环境跑通构建；真正出包时由下面的
+            // taskGraph 钩子直接中止，产物不会被误发布。
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
@@ -87,6 +90,31 @@ android {
     packaging {
         resources {
             excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
+        }
+    }
+}
+
+/**
+ * 出包闸门：要构建 release 却没有正式签名时，直接让构建失败。
+ *
+ * 为什么不能沉默地回退 debug 签名：debug 证书的私钥没有保密性
+ * （口令固定、密钥库可能被复制），用它发布的 APK 任何人都能做「同应用」覆盖升级。
+ * 宁可构建失败，也不产出一个可被顶替的包。
+ */
+if (!hasReleaseSigning) {
+    gradle.taskGraph.whenReady {
+        val buildingRelease = allTasks.any { task ->
+            task.project == project &&
+                (task.name == "assembleRelease" || task.name == "bundleRelease" ||
+                    task.name.startsWith("packageRelease"))
+        }
+        if (buildingRelease) {
+            throw GradleException(
+                "release 构建缺少签名密钥，已中止。\n" +
+                    "需要 android-app/keystore/pay-dose.jks，并设置 PAYDOSE_KEYSTORE_PASSWORD" +
+                    "（或写在 keystore/keystore.properties 里）。\n" +
+                    "不会回退 debug 签名：那样产出的包任何人都能做覆盖升级。"
+            )
         }
     }
 }

@@ -9,6 +9,7 @@ import kotlinx.serialization.decodeFromString
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
@@ -36,11 +37,33 @@ class UpdateChecker(
         private const val API_BASE = "https://gitee.com/api/v5"
         private const val WEB_BASE = "https://gitee.com"
 
+        /** 唯一信任的下载域名，子域一并放行 */
+        private const val OFFICIAL_HOST = "gitee.com"
+
         /** 更新检查是锦上添花，超时短一点，失败就算了 */
         private const val TIMEOUT_SECONDS = 12L
 
         /** 回退列表接口时一次拉多少条 */
         private const val FALLBACK_PAGE_SIZE = 10
+
+        /**
+         * 校验下载地址：必须是 https，且 host 属于 Gitee 官方域名。
+         *
+         * 这一步防的不是「装不上」——系统签名校验已经挡住了改包；
+         * 它防的是 API 响应被中间人改写后，把「去下载」变成一次钓鱼跳转。
+         * 不合格就返回 null，调用方退回 Release 网页。
+         */
+        internal fun trustedDownloadUrl(raw: String?): String? {
+            val url = raw?.trim().orEmpty()
+            if (url.isEmpty()) return null
+
+            val uri = runCatching { URI(url) }.getOrNull() ?: return null
+            if (!uri.scheme.equals("https", ignoreCase = true)) return null
+
+            val host = uri.host?.lowercase() ?: return null
+            val trusted = host == OFFICIAL_HOST || host.endsWith(".$OFFICIAL_HOST")
+            return if (trusted) url else null
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -82,8 +105,8 @@ class UpdateChecker(
                 currentVersion = currentVersion,
                 latestVersion = latest,
                 releaseNotes = release.body.trim(),
-                // 没有 apk 附件就跳 Release 网页，至少让用户看得到说明
-                apkDownloadUrl = apk?.downloadUrl?.ifBlank { null } ?: pageUrl,
+                // 附件地址只认 Gitee 官方域名，否则退回 Release 网页
+                apkDownloadUrl = trustedDownloadUrl(apk?.downloadUrl) ?: pageUrl,
                 apkSizeBytes = apk?.size ?: 0L,
                 releasePageUrl = pageUrl,
             )
@@ -143,7 +166,9 @@ class UpdateChecker(
      * 浏览器下载后用户直接点安装，体验损失很小，但稳定性高得多。
      */
     fun openDownload(url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        // 最后一道闸：调用方将来即便传进来任意地址，也只放行官方 https 页面
+        val safe = trustedDownloadUrl(url) ?: "$WEB_BASE/$repo/releases"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(safe)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

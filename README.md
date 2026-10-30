@@ -108,7 +108,11 @@ $env:PATH = "D:\Program Files\Java\jdk-17\bin;$env:PATH"
 
 产物：`app/build/outputs/apk/release/app-release.apk`
 
-如果本地没有签名密钥库，会自动回退到 debug 签名，照样能编译调试。
+`assembleRelease` 需要 `keystore/pay-dose.jks` 和密码，缺任何一样都会**直接失败**，
+不会回退 debug 签名：debug 证书没有私密性，用它发布的包任何人都能做「同应用」覆盖升级。
+只跑 `assembleDebug` / 单元测试不受影响。
+
+APK 使用 v2 + v3 签名；v3 为将来轮换密钥留出覆盖升级的可能。
 
 ### 安装到设备
 
@@ -124,7 +128,7 @@ cd android-app
 .\gradlew.bat testDebugUnitTest
 ```
 
-25 个用例，纯 JVM 运行，不需要设备。其中 5 个是黄金快照对账，用来保证算法输出稳定。
+41 个用例，纯 JVM 运行，不需要设备。其中 5 个是黄金快照对账，用来保证算法输出稳定。
 
 ### 项目结构
 
