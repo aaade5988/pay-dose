@@ -4,11 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dosepay.app.core.AggUsage
 import com.dosepay.app.core.CycleAgg
+import com.dosepay.app.core.CycleRow
 import com.dosepay.app.core.Cycles
 import com.dosepay.app.core.DashRow
 import com.dosepay.app.core.Methods
+import com.dosepay.app.core.Money
 import com.dosepay.app.data.ApiError
 import com.dosepay.app.data.CycleSummaryDto
+import com.dosepay.app.data.InstallmentInput
 import com.dosepay.app.data.MethodDto
 import com.dosepay.app.data.PlannerRepository
 import com.dosepay.app.data.UiEventBus
@@ -80,6 +83,7 @@ class DashboardViewModel(
                         st.cycle.totalNetCents,
                         st.cycle.settledNetCents,
                         st.cycle.totalRepayCents,
+                        st.cycle.installmentFrozenCents,
                     ),
                 )
             }
@@ -100,6 +104,7 @@ class DashboardViewModel(
                         cycle.totalNetCents,
                         cycle.settledNetCents,
                         cycle.totalRepayCents,
+                        cycle.installmentFrozenCents,
                     ),
                     focusedGauge = focusGauge(it.focusedId, cycle),
                     cycleError = "",
@@ -137,6 +142,7 @@ class DashboardViewModel(
             netCents = row.netCents,
             settledCents = if (row.settled) row.netCents else 0L,
             repaidCents = row.repayCents,
+            installmentCents = row.frozenCents,
         )
     }
 
@@ -158,6 +164,64 @@ class DashboardViewModel(
             try {
                 repository.setMethodSettled(methodId, settled)
                 events.show(if (settled) "已标记已还清 · " + raw.name else "已取消标记 · " + raw.name)
+                load()
+            } catch (e: ApiError) {
+                events.show(e.message)
+            } finally {
+                settling = false
+            }
+        }
+    }
+
+    /**
+     * 看板周期卡左滑「分期 / 取消分期」。
+     *
+     * 账单分期**不写流水、不动已用余额**：钱还欠着，额度照占。
+     * 它只是把「本期待还」拆成首期 + 后续各期，并把挪到未来的本金冻结出去，
+     * 这样仪表盘上的待还压力不会被一笔大额消费虚高。
+     */
+    fun setInstallment(
+        row: CycleRow,
+        principal: String,
+        periods: Int,
+        rateMode: String,
+        rate: String,
+    ) {
+        if (settling) return
+        settling = true
+        viewModelScope.launch {
+            try {
+                val dto = repository.createInstallment(
+                    InstallmentInput(
+                        paymentMethodId = row.id,
+                        cycleEnd = row.cycleEnd,
+                        principal = principal,
+                        periods = periods,
+                        rateMode = rateMode,
+                        rate = rate,
+                    )
+                )
+                events.show(
+                    "已分期 " + row.name + " · 每期 " + Money.moneyCompact(dto.perPeriod) +
+                        " × " + dto.periods + " 期"
+                )
+                load()
+            } catch (e: ApiError) {
+                events.show(e.message)
+            } finally {
+                settling = false
+            }
+        }
+    }
+
+    /** 取消某张卡某一期账单的分期 */
+    fun cancelInstallment(row: CycleRow) {
+        if (settling) return
+        settling = true
+        viewModelScope.launch {
+            try {
+                repository.deleteInstallment(row.id, row.cycleEnd)
+                events.show("已取消分期 · " + row.name)
                 load()
             } catch (e: ApiError) {
                 events.show(e.message)

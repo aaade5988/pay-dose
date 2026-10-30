@@ -27,6 +27,7 @@ import com.dosepay.app.core.BillRow
 import com.dosepay.app.core.ChipStyle
 import com.dosepay.app.ui.components.Avatar
 import com.dosepay.app.ui.components.PayChip
+import com.dosepay.app.ui.components.SwipeAction
 import com.dosepay.app.ui.components.SwipeRevealRow
 import com.dosepay.app.ui.theme.PayColors
 import com.dosepay.app.ui.theme.Radii
@@ -160,8 +161,10 @@ internal fun MonthCard(
             month.rows.forEach { row ->
                 SwipeRevealRow(
                     modifier = Modifier.fillMaxWidth(),
-                    actionLabel = "删除",
-                    onAction = { onDelete(row) },
+                    actionWidthDp = 75,
+                    actions = listOf(
+                        SwipeAction("删除", PayColors.Accent) { onDelete(row) },
+                    ),
                 ) {
                     BillRowView(row)
                 }

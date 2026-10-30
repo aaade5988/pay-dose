@@ -208,17 +208,22 @@ object Methods {
      * （2026-10-28 用户反馈：环 222 与下方本期 0 打架）。
      *
      * 环上两段：
-     * - 紫色 = 本期待还 = 本期净额 − 人工标记已还清
-     * - 绿色 = 已还 = 人工标记的净额 + 本期实际还款流水
+     * - 紫色 = 本期待还 = 本期净额 − 人工标记已还清 − 分期冻结走的本金
+     * - 绿色 = 已还 = 人工标记的净额 + 本期实际还款流水 + 分期冻结走的本金
      *
      * 还款必须同时体现在两段里：待还变小、已还变大。
      * 只降待还的话，环上看不出「这笔钱是还掉的还是根本没用过」。
+     *
+     * 分期的本金也被算进绿色段：钱挪到了未来各期，本期不再是要还的压力。
+     * 但它和「已还清」不同——钱**仍然欠着**，额度照占，
+     * 所以分期的本金没有从已用额度里减掉。
      */
     fun cycleGauge(
         methods: List<MethodDto>,
         netCents: Long,
         settledCents: Long = 0L,
         repaidCents: Long = 0L,
+        installmentCents: Long = 0L,
     ): AggUsage {
         var limitC = 0L
         var limitedCount = 0
@@ -231,9 +236,11 @@ object Methods {
         }
         val netC = netCents.coerceAtLeast(0L)
         val settledC = settledCents.coerceIn(0L, netC)
-        val usedC = netC - settledC
+        // 分期冻结不能超过扣掉「已还清」之后的剩余待还
+        val instC = installmentCents.coerceIn(0L, (netC - settledC).coerceAtLeast(0L))
+        val usedC = netC - settledC - instC
         val repaidC = repaidCents.coerceAtLeast(0L)
-        val frozenC = settledC + repaidC
+        val frozenC = settledC + repaidC + instC
         val pct = if (limitC > 0L) Math.round(usedC * 1000.0 / limitC) / 10.0 else null
         val frozenPct = if (limitC > 0L) Math.round(frozenC * 1000.0 / limitC) / 10.0 else null
         return AggUsage(

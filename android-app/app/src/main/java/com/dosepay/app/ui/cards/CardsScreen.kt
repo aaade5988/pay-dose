@@ -40,6 +40,7 @@ import com.dosepay.app.ui.components.HintText
 import com.dosepay.app.ui.components.PayChip
 import com.dosepay.app.ui.components.PayPullToRefresh
 import com.dosepay.app.ui.components.PrimaryButton
+import com.dosepay.app.ui.components.SwipeAction
 import com.dosepay.app.ui.components.SwipeRevealRow
 import com.dosepay.app.ui.theme.PayColors
 import kotlinx.coroutines.launch
@@ -137,8 +138,10 @@ fun CardsScreen(
                 state.rows.forEach { row ->
                     SwipeRevealRow(
                         modifier = Modifier.fillMaxWidth(),
-                        actionLabel = "删除",
-                        onAction = { pendingDelete = row },
+                        actionWidthDp = 75,
+                        actions = listOf(
+                            SwipeAction("删除", PayColors.Accent) { pendingDelete = row },
+                        ),
                         onContentClick = { onOpenEditor(row.id) },
                     ) {
                         Row(

@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,27 +35,37 @@ import androidx.compose.ui.unit.sp
 import com.dosepay.app.ui.theme.PayColors
 
 /**
+ * 左滑露出的一个操作按钮。
+ *
+ * 颜色走各自的 [color]，所以这里不写死任何语义（删除 / 已还清 / 分期）。
+ */
+data class SwipeAction(
+    val label: String,
+    val color: Color,
+    val onClick: () -> Unit,
+)
+
+/**
  * 左滑露出操作按钮的列表行（对齐原小程序的 swipe-item）。
  *
- * 账单页用 [actionLabel] =「删除」，看板周期卡用「已还清」，
- * 颜色走 [actionColor]，所以这里不写死「删除」语义。
+ * 支持多个动作并排：看板周期卡用「已还清 + 分期」，
+ * 两个动作同构（都作用于「这一期账单」），并排比藏在二级菜单里更好找。
  *
- * @param onAction 点击露出后的操作按钮
+ * @param actions 露出的动作，按给定顺序从左到右排列；为空时不可左滑
  * @param onContentClick 点击内容区（已展开时先收起）
  * @param content 行内容
  */
 @Composable
 fun SwipeRevealRow(
     modifier: Modifier = Modifier,
-    actionWidthDp: Int = 75,
-    actionLabel: String = "删除",
-    actionColor: Color = PayColors.Accent,
-    onAction: () -> Unit,
+    actionWidthDp: Int = 90,
+    actions: List<SwipeAction> = emptyList(),
     onContentClick: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
     val actionWidthPx = with(density) { (actionWidthDp.dp).toPx() }
+    val totalWidthPx = actionWidthPx * actions.size
     var offsetX by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
     val spec: FiniteAnimationSpec<Float> = if (dragging) snap() else tween(180)
@@ -70,19 +81,27 @@ fun SwipeRevealRow(
             .clip(RoundedCornerShape(13.dp))
     ) {
         // 底层：操作按钮
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .width(actionWidthDp.dp)
-                .fillMaxHeight()
-                .background(actionColor)
-                .clickable {
-                    offsetX = 0f
-                    onAction()
-                },
-            contentAlignment = Alignment.Center,
+                .width((actionWidthDp * actions.size).dp)
+                .fillMaxHeight(),
         ) {
-            Text(actionLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            actions.forEach { action ->
+                Box(
+                    modifier = Modifier
+                        .width(actionWidthDp.dp)
+                        .fillMaxHeight()
+                        .background(action.color)
+                        .clickable {
+                            offsetX = 0f
+                            action.onClick()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(action.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
 
         // 上层：内容（可左滑）
@@ -98,12 +117,12 @@ fun SwipeRevealRow(
                         onDragStart = { dragging = true },
                         onDragEnd = {
                             dragging = false
-                            offsetX = if (offsetX < -actionWidthPx / 2f) -actionWidthPx else 0f
+                            offsetX = if (offsetX < -totalWidthPx / 2f) -totalWidthPx else 0f
                         },
                         onDragCancel = { dragging = false },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
-                            offsetX = (offsetX + dragAmount).coerceIn(-actionWidthPx, 0f)
+                            offsetX = (offsetX + dragAmount).coerceIn(-totalWidthPx, 0f)
                         },
                     )
                 }

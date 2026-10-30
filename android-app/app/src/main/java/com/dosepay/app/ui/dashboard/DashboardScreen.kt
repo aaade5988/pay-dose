@@ -46,7 +46,9 @@ import com.dosepay.app.ui.components.PayPullToRefresh
 import com.dosepay.app.ui.components.PrimaryButton
 import com.dosepay.app.ui.components.RingGauge
 import com.dosepay.app.ui.components.SectionDivider
+import com.dosepay.app.ui.components.SwipeAction
 import com.dosepay.app.ui.components.SwipeRevealRow
+import com.dosepay.app.ui.installment.InstallmentSheet
 import com.dosepay.app.ui.theme.PayColors
 import com.dosepay.app.ui.theme.Radii
 import kotlinx.coroutines.launch
@@ -67,6 +69,8 @@ fun DashboardScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     /** 左滑「已还清」待确认的周期卡 */
     var settleTarget by remember { mutableStateOf<CycleRow?>(null) }
+    /** 左滑「分期」待录入的周期卡 */
+    var installmentTarget by remember { mutableStateOf<CycleRow?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { vm.load() }
@@ -211,13 +215,35 @@ fun DashboardScreen(
 
                 state.cycle.rows.forEach { cyc ->
                     val focused = state.focusedId == cyc.id
-                    /* 左滑 → 标记 / 取消「已还清」（人工标记，不写流水） */
+                    /* 左滑 → 标记 / 取消「已还清」+ 分期 / 取消分期
+                     * 两者同构：都作用于「这一期账单」，所以并排露出，比藏进二级菜单好找 */
                     SwipeRevealRow(
                         modifier = Modifier.fillMaxWidth(),
                         actionWidthDp = 90,
-                        actionLabel = if (cyc.settled) "取消标记" else "已还清",
-                        actionColor = if (cyc.settled) PayColors.ChipGrayText else PayColors.RepayGreen,
-                        onAction = { settleTarget = cyc },
+                        actions = buildList {
+                            add(
+                                SwipeAction(
+                                    label = if (cyc.settled) "取消标记" else "已还清",
+                                    color = if (cyc.settled) PayColors.ChipGrayText else PayColors.RepayGreen,
+                                ) { settleTarget = cyc }
+                            )
+                            add(
+                                SwipeAction(
+                                    label = if (cyc.installment != null) "取消分期" else "分期",
+                                    color = if (cyc.installment != null) {
+                                        PayColors.ChipGrayText
+                                    } else {
+                                        PayColors.Primary
+                                    },
+                                ) {
+                                    if (cyc.installment != null) {
+                                        vm.cancelInstallment(cyc)
+                                    } else {
+                                        installmentTarget = cyc
+                                    }
+                                }
+                            )
+                        },
                         /* 点卡片 → 上方环切到这张卡；再点同一张取消，回到全部 */
                         onContentClick = { vm.toggleFocus(cyc.id) },
                     ) {
@@ -265,6 +291,12 @@ fun DashboardScreen(
                                             modifier = Modifier.weight(1f, fill = false),
                                         )
                                         PayChip(text = cyc.rangeText, style = ChipStyle.GRAY)
+                                        if (cyc.installment != null) {
+                                            PayChip(
+                                                text = "分期 " + cyc.installment.periods + " 期",
+                                                style = ChipStyle.ACCENT,
+                                            )
+                                        }
                                     }
                                     Text(
                                         if (cyc.emptyText.isNotEmpty()) {
@@ -278,7 +310,7 @@ fun DashboardScreen(
                                         modifier = Modifier.padding(top = 2.dp),
                                     )
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
+                                                                Column(horizontalAlignment = Alignment.End) {
                                     if (cyc.settled) {
                                         // 已还清：不再显示金额，只显示状态
                                         PayChip(text = "已还清", style = ChipStyle.GREEN)
@@ -287,8 +319,15 @@ fun DashboardScreen(
                                             cyc.netText,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.ExtraBold,
-                                            color = if (cyc.netCents == 0L) PayColors.TextMuted else Color(0xFF3A3742),
+                                            color = if (cyc.dueCents == 0L) PayColors.TextMuted else Color(0xFF3A3742),
                                         )
+                                        if (cyc.installment != null) {
+                                            Text(
+                                                "每期 " + cyc.installment.perPeriodText,
+                                                fontSize = 10.sp,
+                                                color = Color(0xFFA09CAC),
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.height(3.dp))
                                     PayChip(text = cyc.dueText, style = cyc.dueChip)
@@ -341,6 +380,23 @@ fun DashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = { settleTarget = null }) { Text("取消", color = PayColors.TextMuted) }
+            },
+        )
+    }
+
+    /* 左滑「分期」录入弹层 */
+    val installment = installmentTarget
+    if (installment != null) {
+        InstallmentSheet(
+            visible = true,
+            cardName = installment.name,
+            dueCents = installment.dueCents,
+            initial = installment.installment,
+            cycleEnd = installment.cycleEnd,
+            onDismiss = { installmentTarget = null },
+            onSubmit = { principal, periods, rateMode, rate ->
+                installmentTarget = null
+                vm.setInstallment(installment, principal, periods, rateMode, rate)
             },
         )
     }
