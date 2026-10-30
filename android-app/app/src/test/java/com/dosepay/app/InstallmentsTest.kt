@@ -126,6 +126,26 @@ class InstallmentsTest {
         assertMoney("0.0516", s.effectiveAnnualRate)
     }
 
+    /* ────────────── 总利息口径 ────────────── */
+
+    @Test
+    fun `总利息口径_逐期利息合计严格等于输入的总利息`() {
+        val s = Installments.build(
+            principal = d("1305.97"),
+            periods = 12,
+            mode = Installments.RateMode.TOTAL_INTEREST,
+            rate = d("36.79"),
+            firstDueDate = LocalDate.of(2026, 12, 17),
+        )!!
+        // 账单：1305.97 分 12 期，总还款 1342.76，总利息 36.79
+        assertMoney("36.79", s.totalInterest)
+        assertMoney("1342.76", s.totalPayment)
+        assertMoney("1305.97", s.items.fold(BigDecimal.ZERO) { a, p -> a.add(p.principalPart) })
+        // 逐期取整的尾差必须由末期吸收，不能被四舍五入吃掉
+        assertMoney("0.47", s.items.last().interestPart)
+        assertMoney("0.00", s.items.last().endBalance)
+    }
+
     /* ────────────── 看板口径 ────────────── */
 
     @Test

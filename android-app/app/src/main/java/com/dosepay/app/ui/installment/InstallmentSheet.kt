@@ -89,17 +89,28 @@ fun InstallmentSheet(
     var periodsIndex by remember(visible) { mutableStateOf(2) }
     // 默认「年利率」= 等额本息（每期还款固定、利息逐月递减），这是最常见的账单分期形态
     var modeIndex by remember(visible) { mutableStateOf(1) }
-    var rateText by remember(visible) {
-        mutableStateOf(initial?.rateText?.removeSuffix("%") ?: "5.16")
+    // 三种口径各记各的输入：5.16 当总利息就是 5 块 1 毛 6，切过去必须换一套
+    var rateTexts by remember(visible) {
+        mutableStateOf(listOf("7.2", initial?.rateText?.removeSuffix("%") ?: "5.16", ""))
     }
     var errorMessage by remember { mutableStateOf("") }
 
     val periods = PERIOD_PRESETS[periodsIndex]
-    val mode = if (modeIndex == 0) Installments.RateMode.FEE_RATE else Installments.RateMode.ANNUAL_RATE
+    val mode = when (modeIndex) {
+        0 -> Installments.RateMode.FEE_RATE
+        1 -> Installments.RateMode.ANNUAL_RATE
+        else -> Installments.RateMode.TOTAL_INTEREST
+    }
+    val rateText = rateTexts[modeIndex]
 
     val principalDecimal = principal.toBigDecimalOrNull() ?: BigDecimal.ZERO
-    val rateDecimal = (rateText.toBigDecimalOrNull() ?: BigDecimal.ZERO)
-        .divide(BigDecimal(100), 8, RoundingMode.HALF_EVEN)
+    // 「总利息」口径下 rate 直接是金额，不除以 100
+    val rateDecimal = if (modeIndex == 2) {
+        rateText.toBigDecimalOrNull() ?: BigDecimal.ZERO
+    } else {
+        (rateText.toBigDecimalOrNull() ?: BigDecimal.ZERO)
+            .divide(BigDecimal(100), 8, RoundingMode.HALF_EVEN)
+    }
     val firstDue = runCatching { LocalDate.parse(cycleEnd) }.getOrNull() ?: LocalDate.now()
     val schedule = Installments.build(principalDecimal, periods, mode, rateDecimal, firstDue)
 
@@ -182,7 +193,7 @@ fun InstallmentSheet(
             // 计价口径
             SheetField(label = "计价口径", onClick = { }) {
                 SegControl(
-                    items = listOf("总费率", "年利率"),
+                    items = listOf("总费率", "年利率", "总利息"),
                     selectedIndex = modeIndex,
                     onSelect = {
                         modeIndex = it
@@ -191,33 +202,55 @@ fun InstallmentSheet(
                 )
             }
 
-            // 费率
-            SheetField(label = if (modeIndex == 0) "总手续费率" else "年利率", onClick = { }) {
+            // 费率 / 总利息
+            SheetField(
+                label = when (modeIndex) {
+                    0 -> "总手续费率"
+                    1 -> "年利率"
+                    else -> "总利息"
+                },
+                onClick = { },
+            ) {
+                if (modeIndex == 2) {
+                    Text(
+                        "¥",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PayColors.TextMuted,
+                    )
+                }
                 SheetInput(
                     value = rateText,
-                    onValueChange = {
-                        rateText = it.filter { c -> c.isDigit() || c == '.' }.take(6)
+                    onValueChange = { raw ->
+                        val filtered = raw.filter { c -> c.isDigit() || c == '.' }.take(8)
+                        rateTexts = rateTexts.toMutableList().also { it[modeIndex] = filtered }
                         errorMessage = ""
                     },
-                    placeholder = if (modeIndex == 0) "7.2" else "5.16",
+                    placeholder = when (modeIndex) {
+                        0 -> "7.2"
+                        1 -> "5.16"
+                        else -> "36.79"
+                    },
                     focusRequester = remember { FocusRequester() },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     onFocusChange = { },
                     modifier = Modifier.weight(1f),
                 )
-                Text(
-                    "%",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = PayColors.TextMuted,
-                )
+                if (modeIndex != 2) {
+                    Text(
+                        "%",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PayColors.TextMuted,
+                    )
+                }
             }
 
             Text(
-                if (modeIndex == 0) {
-                    "总费率按原始本金一次性收，每期本金与手续费都固定，和银行账单一致"
-                } else {
-                    "年利率按剩余本金逐月计息，每期还款额固定"
+                when (modeIndex) {
+                    0 -> "总费率按原始本金一次性收，每期本金与手续费都固定，和银行账单一致"
+                    1 -> "年利率按剩余本金逐月计息，每期还款额固定"
+                    else -> "填账单上的总利息，每期还款由「本金 + 总利息」均分，和账单逐分对齐"
                 },
                 fontSize = 10.sp,
                 color = PayColors.Hint,

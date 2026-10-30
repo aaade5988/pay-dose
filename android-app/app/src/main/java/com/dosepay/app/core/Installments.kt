@@ -34,7 +34,15 @@ object Installments {
         /** 总手续费率，如 0.072 = 7.2%（一次性按全额收取） */
         const val FEE_RATE = "总费率"
 
-        val ALL = listOf(ANNUAL_RATE, FEE_RATE)
+        /**
+         * 总利息金额，如 36.79。
+         *
+         * 账单上直接印着这个数，填它最省事：每期还款额由此均分得出，
+         * 再反解利率生成等额本息表，算出来的数字与账单逐分对齐。
+         */
+        const val TOTAL_INTEREST = "总利息"
+
+        val ALL = listOf(ANNUAL_RATE, FEE_RATE, TOTAL_INTEREST)
     }
 
     /** 反解月利率时的搜索区间 */
@@ -105,6 +113,7 @@ object Installments {
         val items = when (mode) {
             RateMode.ANNUAL_RATE -> annuitySchedule(principal, periods, rate, firstDueDate)
             RateMode.FEE_RATE -> feeSchedule(principal, periods, rate, firstDueDate)
+            RateMode.TOTAL_INTEREST -> interestSchedule(principal, periods, rate, firstDueDate)
             else -> return null
         }
 
@@ -138,8 +147,48 @@ object Installments {
         firstDueDate: LocalDate,
     ): List<Period> {
         val i = annualRate.divide(BigDecimal(12), PRECISION, RoundingMode.HALF_EVEN)
-        val payment = annuityPayment(principal, i, periods)
+        return annuityScheduleAt(principal, periods, i, annuityPayment(principal, i, periods), firstDueDate)
+    }
 
+    /**
+     * 总利息口径：账单上直接给了「总利息」，每期还款额由它均分得出。
+     *
+     * 先 `R = (本金 + 总利息) / n`，再从这个 R 反解月利率生成等额本息表。
+     * 不重算 R，是为了让 Σ每期 = 本金 + 总利息**严格成立**——
+     * 这正是「和账单逐分对齐」的关键（用利率重算会差几分）。
+     */
+    private fun interestSchedule(
+        principal: BigDecimal,
+        periods: Int,
+        totalInterest: BigDecimal,
+        firstDueDate: LocalDate,
+    ): List<Period> {
+        val payment = principal.add(totalInterest)
+            .divide(BigDecimal(periods), PRECISION, RoundingMode.HALF_EVEN)
+        val i = solveMonthlyRate(principal, payment, periods) ?: BigDecimal.ZERO
+        val raw = annuityScheduleAt(principal, periods, i, payment, firstDueDate)
+
+        // 逐期取整会让 Σ利息 偏离输入的总利息（1305.97/12 期就差 4 分），
+        // 末期按差额补回来——银行也是这么收的，否则总额对不上账单。
+        val collected = raw.dropLast(1).fold(BigDecimal.ZERO) { acc, p -> acc.add(p.interestPart) }
+        val last = raw.last()
+        val fixedLast = last.copy(
+            interestPart = Calculator.quantize(totalInterest.subtract(collected)),
+            principalPart = last.beginBalance,
+            endBalance = BigDecimal.ZERO.setScale(2),
+        )
+        return raw.dropLast(1) + fixedLast
+    }
+
+    /** 等额本息递推：还款额固定为 [payment]，利息按 [monthlyRate] 逐月递减 */
+    private fun annuityScheduleAt(
+        principal: BigDecimal,
+        periods: Int,
+        monthlyRate: BigDecimal,
+        payment: BigDecimal,
+        firstDueDate: LocalDate,
+    ): List<Period> {
+        val i = monthlyRate
         val out = ArrayList<Period>(periods)
         var remain = principal
         for (k in 1..periods) {
