@@ -113,6 +113,65 @@ data class CycleCardDto(
     @SerialName("current_used") val currentUsed: String = "0.00",
     /** 该卡本期是否被人工标记为「已还清」（不计占用，仪表盘冻结成另一种颜色） */
     val settled: Boolean = false,
+    /**
+     * 本期待还（**分期后**的口径）。
+     *
+     * 没有分期时 = net_amount；有分期时 = 净待还 − 冻结到未来的本金 + 首期利息。
+     * net_amount 保留原始值，供仪表盘按同一把尺子算额度占用。
+     */
+    @SerialName("due_amount") val dueAmount: String = "0.00",
+    /** 该卡本期的账单分期计划（没有则 null） */
+    val installment: InstallmentDto? = null,
+)
+
+/**
+ * 账单分期计划。
+ *
+ * 一条 = 「某张卡的某一期账单」被分期的安排。分期不写流水、不动已用额度，
+ * 只把本期待还拆成「首期 + 后续各期」，并把挪到未来的本金冻结出去。
+ */
+@Serializable
+data class InstallmentDto(
+    val id: Long = 0,
+    @SerialName("payment_method_id") val paymentMethodId: Long,
+    /** 被分期的账单所属周期的还款日（= 首期还款日） */
+    @SerialName("cycle_end") val cycleEnd: String = "",
+    /** 分期本金 */
+    val principal: String = "0.00",
+    val periods: Int = 0,
+    /** 计价口径：年利率 / 总费率 */
+    @SerialName("rate_mode") val rateMode: String = "",
+    /** 费率数值（含义随 rate_mode） */
+    val rate: String = "0.00",
+    /** 每期还款额 */
+    @SerialName("per_period") val perPeriod: String = "0.00",
+    /** 每期利息 / 手续费 */
+    @SerialName("interest_per_period") val interestPerPeriod: String = "0.00",
+    /** 总利息 / 总手续费 */
+    @SerialName("total_interest") val totalInterest: String = "0.00",
+    /** 折合年化（单利口径），把「每期 0.6%」翻译成真实利率 */
+    @SerialName("effective_annual_rate") val effectiveAnnualRate: String = "0.00",
+    @SerialName("first_due_date") val firstDueDate: String = "",
+    @SerialName("last_due_date") val lastDueDate: String = "",
+    /**
+     * 挪到未来各期的本金（本期不再计入待还占用）。
+     *
+     * = 分期本金 − 首期本金。本金还在欠着（额度照占），
+     * 但已经不是「这个月要还」的压力，所以从待还里冻结出去。
+     */
+    @SerialName("frozen_amount") val frozenAmount: String = "0.00",
+)
+
+/** 创建 / 更新分期计划的请求体 */
+@Serializable
+data class InstallmentInput(
+    @SerialName("payment_method_id") val paymentMethodId: Long,
+    /** 被分期的账单所属周期的还款日 */
+    @SerialName("cycle_end") val cycleEnd: String = "",
+    val principal: String = "0.00",
+    val periods: Int = 0,
+    @SerialName("rate_mode") val rateMode: String = "",
+    val rate: String = "0.00",
 )
 
 /** 看板周期汇总：各卡本期消费之和 */

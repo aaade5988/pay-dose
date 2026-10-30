@@ -2,10 +2,13 @@ package com.dosepay.app.data.local
 
 import androidx.room.withTransaction
 import com.dosepay.app.core.Calculator
+import com.dosepay.app.core.Installments
 import com.dosepay.app.core.PaymentMethod
 import com.dosepay.app.data.ApiError
 import com.dosepay.app.data.CycleCardDto
 import com.dosepay.app.data.CycleSummaryDto
+import com.dosepay.app.data.InstallmentDto
+import com.dosepay.app.data.InstallmentInput
 import com.dosepay.app.data.MethodDto
 import com.dosepay.app.data.MethodInput
 import com.dosepay.app.data.RecItem
@@ -31,6 +34,7 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
 
     private val methodDao = db.paymentMethodDao()
     private val txnDao = db.transactionDao()
+    private val installmentDao = db.installmentPlanDao()
 
     companion object {
         const val DEFAULT_TOP_N = 3
@@ -74,6 +78,27 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
         } catch (e: Exception) {
             throw ApiError(400, "${label}格式不正确，请使用 YYYY-MM-DD")
         }
+    }
+
+    /**
+     * 费率字符串 → BigDecimal；**保留原始精度**，不做两位小数归一。
+     *
+     * 金额要归一到分，费率不能：5.16% 是 0.0516，两位小数会把它压成 0.05，
+     * 年化直接差出 1 个百分点。
+     */
+    private fun parseRate(value: String?, label: String): BigDecimal {
+        if (value == null || value.isBlank()) {
+            throw ApiError(400, "${label}不能为空")
+        }
+        val rate = try {
+            BigDecimal(value.trim())
+        } catch (e: NumberFormatException) {
+            throw ApiError(400, "${label}请输入有效数字")
+        }
+        if (rate < BigDecimal.ZERO) {
+            throw ApiError(400, "${label}不能小于 0")
+        }
+        return rate
     }
 
     /** 构造 pydantic `literal_error` 形状的 422 */
@@ -132,6 +157,8 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
         if (txnCount > 0) {
             throw ApiError(409, "该卡还有 $txnCount 笔流水，请先删除流水")
         }
+        // 分期计划跟着卡一起走，别留下指向不存在卡片的孤儿数据
+        installmentDao.deleteByMethodId(methodId)
         methodDao.deleteById(methodId)
     }
 
@@ -224,6 +251,8 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
             .filter { it.methodType == Calculator.CREDIT_CARD }
         val txnsByCard: Map<Long, List<TransactionEntity>> =
             if (methods.isEmpty()) emptyMap() else txnDao.findAll().groupBy { it.paymentMethodId }
+        val plansByCard: Map<Long, List<InstallmentPlanEntity>> =
+            if (methods.isEmpty()) emptyMap() else installmentDao.findAll().groupBy { it.paymentMethodId }
 
         var totalSpend = BigDecimal.ZERO
         var totalRepay = BigDecimal.ZERO
@@ -260,6 +289,28 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
             val settled = method.settledUntil != null && !method.settledUntil.isBefore(today)
             if (settled) settledSpend = settledSpend.add(spend)
 
+            val net = spend.subtract(repay)
+
+            // 分期计划：只认「这一期」的（cycle_end == 本还款日）
+            val plan = plansByCard[method.id]?.firstOrNull { it.cycleEndLocalDate == cycleEnd }
+            val schedule = plan?.let {
+                Installments.build(
+                    principal = it.principalDecimal,
+                    periods = it.periods,
+                    mode = it.rateMode,
+                    rate = it.rateDecimal,
+                    firstDueDate = it.cycleEndLocalDate,
+                )
+            }
+            val installment = if (plan != null && schedule != null) buildInstallmentDto(plan, schedule) else null
+
+            // 本期待还 = 净待还 − 冻结到未来的本金 + 首期利息
+            // 分期本金被拆成「首期本金（本期还得掉）」+「其余（冻结到未来各期）」，
+            // 手续费是分期新增的成本，属于本期要付的钱。
+            val frozen = installment?.let { BigDecimal(it.frozenAmount) } ?: BigDecimal.ZERO
+            val firstInterest = schedule?.items?.firstOrNull()?.interestPart ?: BigDecimal.ZERO
+            val due = net.subtract(frozen).add(firstInterest).coerceAtLeast(BigDecimal.ZERO)
+
             cards.add(
                 CycleCardDto(
                     paymentMethodId = method.id,
@@ -271,11 +322,13 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
                     daysToDue = ChronoUnit.DAYS.between(today, cycleEnd).toInt(),
                     spendAmount = Calculator.formatAmount(spend) ?: "0.00",
                     repayAmount = Calculator.formatAmount(repay) ?: "0.00",
-                    netAmount = Calculator.formatAmount(spend.subtract(repay)) ?: "0.00",
+                    netAmount = Calculator.formatAmount(net) ?: "0.00",
                     spendCount = spendCount,
                     repayCount = repayCount,
                     currentUsed = Calculator.formatAmount(method.currentUsed) ?: "0.00",
                     settled = settled,
+                    dueAmount = Calculator.formatAmount(due) ?: "0.00",
+                    installment = installment,
                 )
             )
         }
@@ -309,6 +362,123 @@ class LocalPlannerService(private val db: PayDoseDatabase) {
         }
         methodDao.update(updated)
         methodDao.findById(methodId)!!.toDto()
+    }
+
+    // -------------------- 账单分期 --------------------
+
+    /**
+     * 给某张卡的某一期账单安排分期。
+     *
+     * 分期**不写流水、不动已用额度**：钱还欠着，额度照占。
+     * 它只是把「本期待还」拆成首期 + 后续各期，并把挪到未来的本金冻结出去，
+     * 这样仪表盘上的「待还压力」不会因为一笔大额消费而虚高。
+     *
+     * 同一期账单只允许一条计划，重复提交会覆盖旧的。
+     */
+    suspend fun createInstallment(input: InstallmentInput): InstallmentDto = db.withTransaction {
+        val method = methodDao.findById(input.paymentMethodId)
+            ?: throw ApiError(404, "支付方式 ${input.paymentMethodId} 不存在")
+        if (method.methodType != Calculator.CREDIT_CARD) {
+            throw ApiError(400, "「${method.name}」不是信用卡，没有账单周期，不能分期")
+        }
+        val principal = parseAmount(input.principal, "分期金额")
+        if (principal <= BigDecimal.ZERO) {
+            throw ApiError(400, "分期金额必须大于 0")
+        }
+        if (input.periods !in 1..Installments.MAX_PERIODS) {
+            throw ApiError(400, "期数必须在 1 - ${Installments.MAX_PERIODS} 之间")
+        }
+        if (input.rateMode !in Installments.RateMode.ALL) {
+            throw ApiError(400, "计价口径只能是「年利率」或「总费率」")
+        }
+        val rate = parseRate(input.rate, "费率")
+
+        val today = LocalDate.now()
+        val cycleEnd = Calculator.cycleWindow(today, method.toDomain())?.second
+            ?: throw ApiError(400, "「${method.name}」没有账单周期，无法分期")
+        if (input.cycleEnd.isNotBlank() && input.cycleEnd != cycleEnd.toString()) {
+            throw ApiError(400, "只能对当前账单周期（$cycleEnd）分期")
+        }
+        // 「已还清」与分期互斥：一个说不用还，一个说摊到未来还
+        val settledUntil = method.settledUntil?.let { LocalDate.parse(it) }
+        if (settledUntil != null && !settledUntil.isBefore(today)) {
+            throw ApiError(409, "「${method.name}」本期已标记还清，请先取消标记再分期")
+        }
+        // 口径与看板完全一致：直接复用聚合结果，避免两处算法各算各的
+        val card = cycleSummary().cards.firstOrNull { it.paymentMethodId == method.id }
+            ?: throw ApiError(400, "「${method.name}」本期没有账单")
+        val due = BigDecimal(card.netAmount).coerceAtLeast(BigDecimal.ZERO)
+        if (principal > due) {
+            throw ApiError(400, "分期金额不能超过本期待还 ¥${Calculator.formatAmount(due)}")
+        }
+
+        val schedule = Installments.build(principal, input.periods, input.rateMode, rate, cycleEnd)
+            ?: throw ApiError(400, "分期参数不合法")
+
+        installmentDao.findByMethodAndCycle(method.id, cycleEnd.toString())?.let {
+            installmentDao.delete(it)
+        }
+        installmentDao.insert(
+            InstallmentPlanEntity(
+                paymentMethodId = method.id,
+                cycleEnd = cycleEnd.toString(),
+                principal = Calculator.formatAmount(principal) ?: "0.00",
+                periods = input.periods,
+                rateMode = input.rateMode,
+                rate = rate.toPlainString(),
+            )
+        )
+        val plan = installmentDao.findByMethodAndCycle(method.id, cycleEnd.toString())!!
+        buildInstallmentDto(plan, schedule)
+    }
+
+    /** 取消某张卡某一期账单的分期 */
+    suspend fun deleteInstallment(methodId: Long, cycleEnd: String) = db.withTransaction {
+        val plan = installmentDao.findByMethodAndCycle(methodId, cycleEnd)
+            ?: throw ApiError(404, "该账单没有分期计划")
+        installmentDao.delete(plan)
+    }
+
+    /** 某张卡的全部分期计划 */
+    suspend fun listInstallments(methodId: Long): List<InstallmentDto> {
+        val plans = installmentDao.findByMethodId(methodId)
+        return plans.mapNotNull { plan ->
+            val schedule = Installments.build(
+                plan.principalDecimal,
+                plan.periods,
+                plan.rateMode,
+                plan.rateDecimal,
+                plan.cycleEndLocalDate,
+            ) ?: return@mapNotNull null
+            buildInstallmentDto(plan, schedule)
+        }
+    }
+
+    /** 分期计划实体 + 算法结果 → DTO */
+    private fun buildInstallmentDto(
+        plan: InstallmentPlanEntity,
+        schedule: Installments.Schedule,
+    ): InstallmentDto {
+        val first = schedule.items.first()
+        val last = schedule.items.last()
+        // 挪到未来各期的本金 = 分期本金 − 首期本金
+        val frozen = Calculator.quantize(schedule.principal.subtract(first.principalPart))
+        return InstallmentDto(
+            id = plan.id,
+            paymentMethodId = plan.paymentMethodId,
+            cycleEnd = plan.cycleEnd,
+            principal = Calculator.formatAmount(schedule.principal) ?: "0.00",
+            periods = schedule.periods,
+            rateMode = plan.rateMode,
+            rate = plan.rate,
+            perPeriod = Calculator.formatAmount(first.total) ?: "0.00",
+            interestPerPeriod = Calculator.formatAmount(first.interestPart) ?: "0.00",
+            totalInterest = Calculator.formatAmount(schedule.totalInterest) ?: "0.00",
+            effectiveAnnualRate = schedule.effectiveAnnualRate.toPlainString(),
+            firstDueDate = first.dueDate.toString(),
+            lastDueDate = last.dueDate.toString(),
+            frozenAmount = Calculator.formatAmount(frozen) ?: "0.00",
+        )
     }
 
     // -------------------- 消费流水（余额同事务原子维护） --------------------

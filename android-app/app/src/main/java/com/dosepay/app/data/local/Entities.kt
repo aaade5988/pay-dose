@@ -112,3 +112,57 @@ data class TransactionEntity(
     val amountDecimal: BigDecimal get() = BigDecimal(amount)
     val txnLocalDate: LocalDate get() = LocalDate.parse(txnDate)
 }
+
+/**
+ * 账单分期计划表。
+ *
+ * 一条记录 = 「某张卡的某一期账单」被分期的安排，所以唯一键是
+ * (payment_method_id, cycle_end)：同一期账单最多一条分期计划。
+ *
+ * 这**不是流水**：分期不写 transactions，也不改 current_used
+ * （钱还欠着，额度照占）。它只把「本期待还」拆成首期 + 后续各期，
+ * 并把挪到未来的本金从本期占用里冻结出去。
+ *
+ * rate_mode 决定 rate 的含义：
+ * - [com.dosepay.app.core.Installments.RateMode.ANNUAL_RATE]：年化利率，如 0.0516
+ * - [com.dosepay.app.core.Installments.RateMode.FEE_RATE]：总手续费率，如 0.072
+ */
+@Entity(
+    tableName = "installment_plans",
+    indices = [androidx.room.Index(value = ["payment_method_id", "cycle_end"], unique = true)],
+)
+data class InstallmentPlanEntity(
+    @PrimaryKey(autoGenerate = true)
+    @ColumnInfo(name = "id")
+    val id: Long = 0,
+
+    @ColumnInfo(name = "payment_method_id")
+    val paymentMethodId: Long,
+
+    /** 被分期的账单所属周期的还款日 "YYYY-MM-DD"（= 首期还款日） */
+    @ColumnInfo(name = "cycle_end")
+    val cycleEnd: String,
+
+    /** 分期本金 */
+    @ColumnInfo(name = "principal")
+    val principal: String,
+
+    /** 期数 */
+    @ColumnInfo(name = "periods")
+    val periods: Int,
+
+    /** 计价口径：年利率 / 总费率 */
+    @ColumnInfo(name = "rate_mode")
+    val rateMode: String,
+
+    /** 费率数值（含义随 rate_mode） */
+    @ColumnInfo(name = "rate")
+    val rate: String,
+
+    @ColumnInfo(name = "created_at")
+    val createdAt: String = LocalDateTime.now().toString(),
+) {
+    val principalDecimal: BigDecimal get() = BigDecimal(principal)
+    val rateDecimal: BigDecimal get() = BigDecimal(rate)
+    val cycleEndLocalDate: LocalDate get() = LocalDate.parse(cycleEnd)
+}

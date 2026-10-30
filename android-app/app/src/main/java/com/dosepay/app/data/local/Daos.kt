@@ -80,3 +80,38 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions")
     suspend fun count(): Int
 }
+
+/**
+ * 分期计划 DAO。
+ *
+ * 查重靠数据库上的唯一索引 (payment_method_id, cycle_end)：
+ * 同一期账单只允许一条分期计划，重复插入直接被数据库挡下。
+ */
+@Dao
+interface InstallmentPlanDao {
+
+    /** 某卡某期的分期计划 */
+    @Query(
+        "SELECT * FROM installment_plans " +
+            "WHERE payment_method_id = :methodId AND cycle_end = :cycleEnd LIMIT 1"
+    )
+    suspend fun findByMethodAndCycle(methodId: Long, cycleEnd: String): InstallmentPlanEntity?
+
+    /** 某卡的全部分期计划（按首期还款日升序） */
+    @Query("SELECT * FROM installment_plans WHERE payment_method_id = :methodId ORDER BY cycle_end ASC")
+    suspend fun findByMethodId(methodId: Long): List<InstallmentPlanEntity>
+
+    /** 全部分期计划 */
+    @Query("SELECT * FROM installment_plans ORDER BY cycle_end ASC")
+    suspend fun findAll(): List<InstallmentPlanEntity>
+
+    @Insert
+    suspend fun insert(entity: InstallmentPlanEntity): Long
+
+    @Delete
+    suspend fun delete(entity: InstallmentPlanEntity)
+
+    /** 删卡时清掉它的分期计划，避免留下指向不存在卡片的孤儿数据 */
+    @Query("DELETE FROM installment_plans WHERE payment_method_id = :methodId")
+    suspend fun deleteByMethodId(methodId: Long)
+}

@@ -34,6 +34,19 @@ class PlannerRepository(
     suspend fun setMethodSettled(id: Long, settled: Boolean): MethodDto =
         service.setSettled(id, settled)
 
+    /** 账单分期：给某张卡的某一期账单安排分期，不写流水、不动已用余额 */
+    suspend fun createInstallment(body: InstallmentInput): InstallmentDto =
+        service.createInstallment(body)
+
+    /** 取消账单分期 */
+    suspend fun deleteInstallment(methodId: Long, cycleEnd: String) {
+        service.deleteInstallment(methodId, cycleEnd)
+    }
+
+    /** 某张卡的全部分期计划 */
+    suspend fun listInstallments(methodId: Long): List<InstallmentDto> =
+        service.listInstallments(methodId)
+
     suspend fun recommend(request: RecommendRequest): List<RecItem> = service.recommend(request)
 
     /** 看板：按账单周期聚合（上一还款日 → 本还款日） */
