@@ -352,7 +352,8 @@ fun CalcScreen(
         onSubmit = { body -> vm.createTransaction(body) },
         onSubmitted = { tx ->
             vm.onTxnSubmitted()
-            vm.onTxnCreated(tx.paymentMethodName)
+            vm.resetAfterTxn()
+            vm.onTxnCreated(tx.paymentMethodName, tx.amount)
         },
     )
 }

@@ -278,13 +278,39 @@ class CalcViewModel(
     /** 提交一笔流水（记账弹层调用） */
     suspend fun createTransaction(body: TxnInput): TxnDto = repository.createTransaction(body)
 
-    /** 记一笔成功提示 */
-    fun onTxnCreated(methodName: String) {
-        events.show("已记入 " + methodName)
+    /** 记一笔成功提示：带上金额，清空输入后仍能确认刚才记了多少 */
+    fun onTxnCreated(methodName: String, amount: String) {
+        events.show("已记入 " + methodName + " " + Money.moneyCompact(amount))
     }
 
     /** 记一笔成功后刷新卡片余额 */
     fun onTxnSubmitted() {
         loadMethods()
+    }
+
+    /**
+     * 记账成功：清空金额与推荐结果，回到初始态。
+     *
+     * 不复用 [onClearAmount]：那个会把光标重新聚焦到金额框（用户主动点 ✕ 重新输入时合理），
+     * 记账后弹层刚关就弹键盘很突兀，所以这里显式 `amountFocused = false`。
+     *
+     * 支付日期保留：连续记账通常发生在同一天。
+     * 顺带解决重复记账：金额清空后「记一笔」没有可提交的内容，不会手滑记两遍。
+     */
+    fun resetAfterTxn() {
+        lastResults = emptyList()
+        lastAmount = ""
+        _state.update {
+            it.copy(
+                amountInput = "",
+                amountDisplay = "0.00",
+                amountFocused = false,
+                status = ResultStatus.EMPTY,
+                errorMessage = "",
+                results = emptyList(),
+                resultCountText = "",
+                filteredNote = "",
+            )
+        }
     }
 }
