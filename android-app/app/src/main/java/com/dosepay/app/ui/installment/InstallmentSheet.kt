@@ -85,9 +85,10 @@ fun InstallmentSheet(
         mutableStateOf(Money.fromCents(if (dueCents > 0L) dueCents else 0L))
     }
     var periodsIndex by remember(visible) { mutableStateOf(2) }
-    var modeIndex by remember(visible) { mutableStateOf(0) }
+    // 默认「年利率」= 等额本息（每期还款固定、利息逐月递减），这是最常见的账单分期形态
+    var modeIndex by remember(visible) { mutableStateOf(1) }
     var rateText by remember(visible) {
-        mutableStateOf(initial?.rateText?.removeSuffix("%") ?: "7.2")
+        mutableStateOf(initial?.rateText?.removeSuffix("%") ?: "5.16")
     }
     var errorMessage by remember { mutableStateOf("") }
 
@@ -234,11 +235,17 @@ fun InstallmentSheet(
                             Money.moneyCompact(Calculator.formatAmount(schedule.firstPayment)),
                             bold = true,
                         )
+                        // 利息要显示「首期 → 末期」，否则等额本息看起来像每期固定
+                        val firstInterest = schedule.items.first().interestPart
+                        val lastInterest = schedule.items.last().interestPart
                         PreviewLine(
-                            "每期利息",
-                            Money.moneyCompact(
-                                Calculator.formatAmount(schedule.items.first().interestPart),
-                            ),
+                            if (firstInterest.compareTo(lastInterest) == 0) "每期利息" else "利息首末",
+                            if (firstInterest.compareTo(lastInterest) == 0) {
+                                Money.moneyCompact(Calculator.formatAmount(firstInterest)) + "（固定）"
+                            } else {
+                                Money.moneyCompact(Calculator.formatAmount(firstInterest)) +
+                                    " → " + Money.moneyCompact(Calculator.formatAmount(lastInterest))
+                            },
                         )
                         PreviewLine(
                             "总利息",
