@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -275,6 +277,46 @@ fun InstallmentSheet(
                 }
             }
 
+            // 逐期明细：期数 / 利息 / 本金 / 剩余
+            // 汇总数字看不出「利息在递减、本金在递增」，摊开成表最直观
+            if (schedule != null) {
+                PayCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "每期明细",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PayColors.Text,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            TableCell("期", 0.6f, header = true, atStart = true)
+                            TableCell("利息", 1f, header = true)
+                            TableCell("还本金", 1f, header = true)
+                            TableCell("剩余本金", 1.2f, header = true)
+                        }
+                        schedule.items.forEachIndexed { index, period ->
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                TableCell("${index + 1}", 0.6f, atStart = true)
+                                // 明细表统一保留两位小数：1,199.69 和 110 混排不齐
+                                TableCell(
+                                    Money.money(Calculator.formatAmount(period.interestPart)),
+                                    1f,
+                                )
+                                TableCell(
+                                    Money.money(Calculator.formatAmount(period.principalPart)),
+                                    1f,
+                                )
+                                TableCell(
+                                    Money.money(Calculator.formatAmount(period.endBalance)),
+                                    1.2f,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             if (overLimit) {
                 Text(
                     "分期金额不能超过本期待还 " +
@@ -303,6 +345,24 @@ fun InstallmentSheet(
         }
     }
 }
+/** 明细表的一格：按权重分列，默认右对齐（金额），期数那列左对齐 */
+@Composable
+private fun RowScope.TableCell(
+    text: String,
+    weight: Float,
+    header: Boolean = false,
+    atStart: Boolean = false,
+) {
+    Text(
+        text,
+        modifier = Modifier.weight(weight),
+        fontSize = 11.sp,
+        textAlign = if (atStart) TextAlign.Start else TextAlign.End,
+        fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
+        color = if (header) PayColors.Hint else PayColors.Text,
+    )
+}
+
 /** 预览区的一行：左边标签、右边数值 */
 @Composable
 private fun PreviewLine(label: String, value: String, bold: Boolean = false) {
